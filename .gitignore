@@ -1,0 +1,10 @@
+backend/data/
+frontend/dist/
+frontend/node_modules/
+output/playwright/
+dist/
+.cache/
+.DS_Store
+*.log
+.cache/
+.playwright-cli/
