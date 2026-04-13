@@ -32,7 +32,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("candy deploy server listening on %s", cfg.Addr)
+		log.Printf("candy-sweet delivery server listening on %s", cfg.Addr)
 		if cfg.UsingDevSecret {
 			log.Printf("warning: CANDY_APP_SECRET is not set; using an insecure development secret")
 		}
