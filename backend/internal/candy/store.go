@@ -616,7 +616,7 @@ func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
 
 	repos := make([]Repository, 0)
 	for rows.Next() {
-		repo, err := s.scanRepository(rows, false)
+		repo, err := s.scanRepository(rows, true)
 		if err != nil {
 			return nil, err
 		}

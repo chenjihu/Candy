@@ -858,9 +858,37 @@ code {
 }
 
 .meta-block code {
+  display: block;
   color: var(--foreground);
   font-size: 0.84rem;
   line-height: 1.45;
+  min-width: 0;
+}
+
+.meta-block-copy {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.meta-block-copy code {
+  align-self: center;
+}
+
+.btn.icon-button {
+  flex: none;
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  gap: 0;
+}
+
+.btn.icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .repo-footer {

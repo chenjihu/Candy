@@ -764,6 +764,45 @@ function shortSha(value, locale = getRuntimeLocale()) {
   return value ? value.slice(0, 8) : translate(locale, 'common.latest');
 }
 
+function maskSecret(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+  if (text.length <= 4) {
+    return '••••';
+  }
+  if (text.length <= 8) {
+    return `${text.slice(0, 2)}••••${text.slice(-2)}`;
+  }
+  return `${text.slice(0, 4)}••••••${text.slice(-4)}`;
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <rect
+        x="7"
+        y="3"
+        width="8"
+        height="10"
+        rx="1.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M5 7H4.5A2.5 2.5 0 0 0 2 9.5v4A2.5 2.5 0 0 0 4.5 16h4A2.5 2.5 0 0 0 11 13.5V13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function formatTime(value, locale = getRuntimeLocale()) {
   if (!value) {
     return '-';
@@ -2649,12 +2688,22 @@ function RepoCard({ repo, onCopy, onEdit, onTrigger, onDelete }) {
           value={repo.repoUrl}
         />
         <MetaBlock
-          label={t('labels.webhookUrl')}
-          value={repo.webhookUrl}
+          label={t('labels.deploymentKey')}
+          value={repo.deployKey ? maskSecret(repo.deployKey) : t('common.notSet')}
+          copyValue={repo.deployKey}
+          onCopy={onCopy}
         />
         <MetaBlock
-          label={t('labels.deploymentKey')}
-          value={repo.webhookSecret ? t('repository.webhookSecretState') : t('common.notSet')}
+          label={t('labels.webhookUrl')}
+          value={repo.webhookUrl}
+          copyValue={repo.webhookUrl}
+          onCopy={onCopy}
+        />
+        <MetaBlock
+          label={t('labels.webhookSecret')}
+          value={repo.webhookSecret ? maskSecret(repo.webhookSecret) : t('common.notSet')}
+          copyValue={repo.webhookSecret}
+          onCopy={onCopy}
         />
         <MetaBlock
           label={t('labels.deploymentScript')}
@@ -2674,12 +2723,6 @@ function RepoCard({ repo, onCopy, onEdit, onTrigger, onDelete }) {
         </div>
 
         <div className="repo-actions">
-          <Button type="button" variant="secondary" size="sm" onClick={() => onCopy(repo.webhookUrl, t('labels.webhookUrl'))}>
-            {t('common.copy')}
-          </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={() => onCopy(repo.webhookSecret, t('labels.webhookSecret'))}>
-            {t('common.copy')}
-          </Button>
           <Button type="button" variant="secondary" size="sm" onClick={onTrigger}>
             {t('common.trigger')}
           </Button>
@@ -2746,11 +2789,31 @@ function RunnerCard({ runner, onEdit, onTest, onDelete }) {
   );
 }
 
-function MetaBlock({ label, value }) {
+function MetaBlock({ label, value, copyValue, onCopy }) {
+  const { t } = useI18n();
+  const canCopy = Boolean(copyValue);
+  const ariaLabel = `${t('common.copy')} ${label}`;
   return (
     <div className="meta-block">
       <span>{label}</span>
-      <code>{value || '-'}</code>
+      {canCopy ? (
+        <div className="meta-block-copy">
+          <code>{value || '-'}</code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="icon-button"
+            aria-label={ariaLabel}
+            title={ariaLabel}
+            onClick={() => onCopy(copyValue, label)}
+          >
+            <CopyIcon />
+          </Button>
+        </div>
+      ) : (
+        <code>{value || '-'}</code>
+      )}
     </div>
   );
 }
