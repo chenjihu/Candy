@@ -74,6 +74,10 @@ for target in $TARGETS; do
 
   mkdir -p "$package_dir/frontend"
   cp -R "$ROOT_DIR/frontend/dist" "$package_dir/frontend/dist"
+  if [ -d "$ROOT_DIR/docs/readme" ]; then
+    mkdir -p "$package_dir/docs"
+    cp -R "$ROOT_DIR/docs/readme" "$package_dir/docs/readme"
+  fi
   for readme in README.md README.zh.md; do
     if [ -f "$ROOT_DIR/$readme" ]; then
       cp "$ROOT_DIR/$readme" "$package_dir/$readme"

@@ -1,10 +1,26 @@
-# Candy
+<p align="center">
+  <img src="docs/readme/candy-logo.png" alt="Candy logo" width="220" />
+</p>
+
+<h1 align="center">Candy</h1>
+<p align="center"><strong>Candy-Sweet Delivery</strong></p>
 
 Candy is a lightweight webhook deployment control plane. It exposes a GitHub/Gitee-compatible webhook endpoint. After a push event arrives, the central service pulls the repository code and then deploys it on the local Runner or an SSH Runner.
 
 Language: English | [Chinese version](./README.zh.md)
 
 Terminology: this document uses Runner for the deployment execution endpoint. When no remote Runner is configured, the central service uses the local Runner to run deployments.
+
+## Screenshots
+
+### Overview
+![Candy overview dashboard](docs/readme/screenshot-overview.png)
+
+### Repositories
+![Candy repositories page](docs/readme/screenshot-repositories.png)
+
+### Add repository
+![Candy add repository form](docs/readme/screenshot-add-repository.png)
 
 ## Features
 

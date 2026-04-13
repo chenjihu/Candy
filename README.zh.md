@@ -1,10 +1,26 @@
-# Candy
+<p align="center">
+  <img src="docs/readme/candy-logo.png" alt="Candy logo" width="220" />
+</p>
+
+<h1 align="center">Candy</h1>
+<p align="center"><strong>Candy-Sweet Delivery</strong></p>
 
 Candy 是一个轻量级 webhook 部署中枢。它对外暴露兼容 GitHub / Gitee webhook 的地址，收到 push 事件后由中心服务拉取仓库代码，再在本机 Runner 或 SSH Runner 上分发代码并执行部署脚本。
 
 语言：中文 | [English](./README.md)
 
 术语约定：本文统一使用 Runner 表示部署执行端；未配置远端执行端时，中心服务使用本机 Runner 执行部署。
+
+## 系统截图
+
+### 总览
+![Candy 总览页](docs/readme/screenshot-overview.png)
+
+### 仓库
+![Candy 仓库页](docs/readme/screenshot-repositories.png)
+
+### 新增仓库
+![Candy 新增仓库页](docs/readme/screenshot-add-repository.png)
 
 ## 当前功能
 
