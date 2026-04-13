@@ -74,7 +74,11 @@ for target in $TARGETS; do
 
   mkdir -p "$package_dir/frontend"
   cp -R "$ROOT_DIR/frontend/dist" "$package_dir/frontend/dist"
-  cp "$ROOT_DIR/README.md" "$package_dir/README.md"
+  for readme in README.md README.zh.md; do
+    if [ -f "$ROOT_DIR/$readme" ]; then
+      cp "$ROOT_DIR/$readme" "$package_dir/$readme"
+    fi
+  done
   cat > "$package_dir/env.example" <<EOF
 CANDY_ADDR=:8080
 CANDY_PUBLIC_URL=https://deploy.example.com
