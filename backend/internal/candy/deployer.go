@@ -359,9 +359,19 @@ func streamLines(reader io.Reader, stream string, logLine func(string, string), 
 			logLine(stream, scanner.Text())
 		}
 	}
-	if err := scanner.Err(); err != nil && logLine != nil {
+	if err := scanner.Err(); err != nil && logLine != nil && !isBenignLogScannerError(err) {
 		logLine("system", "log scanner error: "+err.Error())
 	}
+}
+
+func isBenignLogScannerError(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, os.ErrClosed) {
+		return true
+	}
+	return strings.Contains(err.Error(), "file already closed") || strings.Contains(err.Error(), "read on closed pipe")
 }
 
 func commandExitCode(err error) *int {

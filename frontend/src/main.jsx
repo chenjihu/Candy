@@ -707,6 +707,16 @@ function normalizePathname(pathname) {
   return pathname.replace(/\/+$/, '') || '/';
 }
 
+const ANSI_ESCAPE_SEQUENCE = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+const ANSI_COLOR_FRAGMENT = /\[(?:\d{1,3}(?:;\d{1,3})*)m/g;
+
+function sanitizeLogLine(line) {
+  return String(line || '')
+    .replace(ANSI_ESCAPE_SEQUENCE, '')
+    .replace(ANSI_COLOR_FRAGMENT, '')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
+}
+
 function randomSecret(length = 24) {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -1603,7 +1613,7 @@ function DashboardPage({
                         className={line.stream === 'stderr' ? 'log-line stderr' : 'log-line stdout'}
                       >
                         <span className="log-tag">[{line.stream}]</span>
-                        <span>{line.line}</span>
+                        <span>{sanitizeLogLine(line.line)}</span>
                       </div>
                   ))
                 ) : (
@@ -2775,7 +2785,7 @@ function LogViewer({ logs }) {
           className={line.stream === 'stderr' ? 'log-line stderr' : 'log-line stdout'}
         >
           <span className="log-tag">[{line.stream}]</span>
-          <span>{line.line}</span>
+          <span>{sanitizeLogLine(line.line)}</span>
         </div>
       ))}
     </div>

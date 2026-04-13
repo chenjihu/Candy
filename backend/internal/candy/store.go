@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -823,7 +824,7 @@ func (s *Store) FinishJob(ctx context.Context, id int64, status string, exitCode
 func (s *Store) AddJobLog(ctx context.Context, jobID int64, stream, line string) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO job_logs (job_id, stream, line, created_at) VALUES (?, ?, ?, ?)`,
-		jobID, stream, line, dbTime(time.Now()),
+		jobID, stream, sanitizeLogLine(line), dbTime(time.Now()),
 	)
 	return err
 }
@@ -872,6 +873,22 @@ func (s *Store) scanRunner(row scanner, includePrivateKey bool) (Runner, error) 
 	runner.CreatedAt = parseDBTime(createdAt)
 	runner.UpdatedAt = parseDBTime(updatedAt)
 	return runner, nil
+}
+
+var ansiEscapeSequence = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
+
+func sanitizeLogLine(line string) string {
+	line = ansiEscapeSequence.ReplaceAllString(line, "")
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\t':
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, line)
 }
 
 func (s *Store) scanRepository(row scanner, includeDeployKey bool) (Repository, error) {
