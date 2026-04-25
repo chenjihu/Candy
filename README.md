@@ -25,25 +25,27 @@ Terminology: this document uses Runner for the deployment execution endpoint. Wh
 ## Features
 
 - Admin dashboard login. The super admin username and password come from environment variables.
-- Repository configuration: Git URL, platform, webhook secret, deployment key, trigger branch, work directory, deployment script, whether to clean the worktree, and target Runner.
+- Environment-aware deployment bindings with dedicated colors for `Production`, `Staging`, `Test`, or custom environments.
+- Repository source reuse: keep one shared Git source and deployment key, then bind different branches and scripts per environment.
 - GitHub `X-Hub-Signature-256` verification.
 - Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` signature verification, with legacy token equality fallback.
 - Delivery deduplication, ignore non-target branches, and async job queueing.
 - Central service clone/fetch and checkout to the commit referenced by the webhook.
 - Local Runner: run `bash -lc` in the work directory.
 - SSH Runner: after checkout on the central service, use `scp` to sync to the remote directory, then use `ssh` to run the script.
+- Secret management: encrypted global or repository-scoped values injected into deployments as environment variables.
 - SQLite persistence for repositories, Runners, job history, and logs; sensitive fields are stored with AES-GCM encryption.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    admin["Ops team<br/>Browser dashboard"] --> ui["Candy Admin UI<br/>Repositories / Runners / Scripts / History"]
+    admin["Ops team<br/>Browser dashboard"] --> ui["Candy Admin UI<br/>Environments / Repos / Runners / History"]
     ui --> api["Candy Server<br/>Go API"]
 
-    github["GitHub / Gitee<br/>push webhook"] --> webhook["/webhooks/{repo_id}<br/>signature check / branch filter / dedupe"]
+    github["GitHub / Gitee<br/>push webhook"] --> webhook["/webhooks/{webhookId}<br/>signature check / branch filter / dedupe"]
     webhook --> queue["Deployment job queue<br/>queued / running / succeeded / failed"]
-    api --> db[("SQLite<br/>config / encrypted secrets / jobs / logs")]
+    api --> db[("SQLite<br/>environments / repository sources / bindings / secrets / jobs / logs")]
     webhook --> db
     queue --> db
 
@@ -58,7 +60,7 @@ flowchart LR
     db --> ui
 ```
 
-In one sentence: Git platforms only deliver push events to Candy; Candy verifies the webhook, fetches code, selects the local or SSH Runner, runs the deployment script, and stores the full trace in SQLite for the admin dashboard.
+In one sentence: Git platforms only deliver push events to Candy; Candy resolves the environment binding by `webhookId`, fetches code from the shared repository source, selects the local or SSH Runner, runs the deployment script, and stores the full trace in SQLite for the admin dashboard.
 
 ## Getting Started
 
@@ -178,6 +180,23 @@ All variables can be provided either through shell environment variables or a `.
 - `CANDY_LOGIN_LOCKOUT_SECONDS`: temporary lockout duration after the threshold is exceeded, default `900`.
 - `CANDY_TRUST_PROXY_HEADERS`: whether to trust `X-Forwarded-For` / `X-Real-IP` when identifying the source IP, default `false`. Only enable this if your reverse proxy already sanitizes these headers.
 
+## Environments
+
+Candy supports multiple runtime environments such as `Production`, `Staging`, and `Test`.
+
+- Runners, Secrets, deployment bindings, and deployment history are isolated per environment.
+- The UI highlights the current environment with a dedicated accent color to reduce mistakes.
+- A single installation always keeps at least one environment.
+
+## Repository Reuse
+
+Candy now separates repository data into two layers:
+
+- `Repository source`: global Git URL and deployment key, stored once
+- `Environment repository binding`: branch, work directory, Webhook secret, deploy script, and Runner selection for one environment
+
+This lets one repository source deploy `main` in `Production` and `develop` in `Staging` without duplicating the deployment key.
+
 ## Login Security
 
 The login endpoint has brute-force protection enabled by default, and failure counters are persisted in SQLite:
@@ -194,12 +213,18 @@ If the service is deployed behind Nginx, Caddy, Traefik, or another reverse prox
 
 ## Webhook Setup
 
-After creating a repository in the admin console, copy the webhook URL and secret from the repository row:
+After creating an environment repository binding in the admin console, copy the webhook URL and secret from the repository row:
 
-- GitHub: set the Webhook URL to `https://your-host/webhooks/{id}`, choose `application/json` as the content type, set the secret generated or configured in the console, and select the push event.
+- GitHub: set the Webhook URL to `https://your-host/webhooks/{webhookId}`, choose `application/json` as the content type, set the secret generated or configured in the console, and select the push event.
 - Gitee: use the same URL, set the secret in the console, select the push event, and prefer Gitee's signature secret verification mode.
 
 Only when the payload branch matches the repository's trigger branch will the job be queued.
+
+## Secret Injection
+
+Secrets can be created in the Secrets tab. The name must be a valid environment variable name such as `DATABASE_URL` or `API_TOKEN`. Values are encrypted in SQLite and are only exposed to the deployment process.
+
+Environment-global Secrets apply to every repository binding inside that environment. Repository-scoped Secrets apply only to that environment repository binding, and override an environment-global Secret with the same name. During deployment, Candy injects these values together with built-in variables such as `CANDY_REPOSITORY_NAME`, so scripts and applications can read them through the normal environment.
 
 ## Runner Conventions
 

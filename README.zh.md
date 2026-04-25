@@ -25,25 +25,27 @@ Candy 是一个轻量级 webhook 部署中枢。它对外暴露兼容 GitHub / G
 ## 当前功能
 
 - 管理后台登录，超级管理员用户名和密码来自环境变量。
-- 仓库配置：Git 地址、平台、webhook secret、deployment key、触发分支、工作目录、部署脚本、是否清理 worktree、目标 Runner。
+- 支持 `Production`、`Staging`、`Test` 等运行环境，并为不同环境提供明显的界面色彩提示。
+- 支持仓库源复用：共享 Git 地址和 deployment key，再按环境分别绑定分支、脚本和 Runner。
 - GitHub `X-Hub-Signature-256` 校验。
 - Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` 签名校验，并兼容旧式 token 等值校验。
 - delivery 去重，非目标分支忽略，任务异步入队。
 - 中心服务 clone/fetch，并 checkout 到 webhook 指定 commit。
 - 本机 Runner：在工作目录中执行 `bash -lc`。
 - SSH Runner：中心服务 checkout 后通过 `scp` 分发到远端目录，再用 `ssh` 执行脚本。
+- Secret 管理：加密保存全局或仓库级敏感值，并在部署时以环境变量方式注入。
 - SQLite 持久化仓库、Runner、任务历史和日志；敏感字段 AES-GCM 加密落库。
 
 ## 原理图
 
 ```mermaid
 flowchart LR
-    admin["运维人员<br/>浏览器管理后台"] --> ui["Candy Admin UI<br/>仓库 / Runner / 脚本 / 历史"]
+    admin["运维人员<br/>浏览器管理后台"] --> ui["Candy Admin UI<br/>环境 / 仓库 / Runner / 历史"]
     ui --> api["Candy Server<br/>Go API"]
 
-    github["GitHub / Gitee<br/>push webhook"] --> webhook["/webhooks/{repo_id}<br/>签名校验 / 分支过滤 / 去重"]
+    github["GitHub / Gitee<br/>push webhook"] --> webhook["/webhooks/{webhookId}<br/>签名校验 / 分支过滤 / 去重"]
     webhook --> queue["部署任务队列<br/>queued / running / succeeded / failed"]
-    api --> db[("SQLite<br/>配置 / 密钥密文 / 任务 / 日志")]
+    api --> db[("SQLite<br/>环境 / 仓库源 / 绑定 / Secret / 任务 / 日志")]
     webhook --> db
     queue --> db
 
@@ -58,7 +60,7 @@ flowchart LR
     db --> ui
 ```
 
-一句话理解：Git 平台只负责把 push 事件打到 Candy；Candy 负责校验 webhook、拉取代码、选择本机或 SSH Runner 执行部署脚本，并把全过程写入 SQLite 供管理后台查看。
+一句话理解：Git 平台只负责把 push 事件打到 Candy；Candy 通过 `webhookId` 定位环境绑定，再从共享仓库源拉代码、选择本机或 SSH Runner 执行部署脚本，并把全过程写入 SQLite 供管理后台查看。
 
 ## 启动
 
@@ -178,6 +180,23 @@ cp env.example .env
 - `CANDY_LOGIN_LOCKOUT_SECONDS`：超过阈值后的临时锁定时间，默认 `900`。
 - `CANDY_TRUST_PROXY_HEADERS`：是否信任 `X-Forwarded-For` / `X-Real-IP` 识别来源 IP，默认 `false`。仅在反向代理已经清洗这些请求头时启用。
 
+## 环境
+
+Candy 支持多个运行环境，例如 `Production`、`Staging`、`Test`。
+
+- Runner、Secret、部署绑定和部署历史按环境隔离
+- 界面会用环境专属强调色提示当前操作环境，降低误操作风险
+- 单个系统实例始终至少保留一个环境
+
+## 仓库复用
+
+Candy 现在将仓库信息拆成两层：
+
+- `仓库源`：全局共享的 Git 地址和 deployment key，只保存一次
+- `环境仓库绑定`：当前环境下的分支、工作目录、Webhook secret、部署脚本和 Runner 选择
+
+这样同一个仓库源可以在 `Production` 用 `main` 分支，在 `Staging` 用 `develop` 分支，而不用重复配置 deployment key。
+
 ## 登录安全策略
 
 登录接口默认启用防暴力破解保护，并将失败计数持久化到 SQLite：
@@ -194,12 +213,18 @@ cp env.example .env
 
 ## Webhook 配置
 
-在管理台创建仓库后，复制仓库行中的 webhook 地址和密钥：
+在管理台创建环境仓库绑定后，复制仓库行中的 webhook 地址和密钥：
 
-- GitHub：Webhook URL 填 `https://your-host/webhooks/{id}`，Content type 选 `application/json`，Secret 填管理台生成或设置的 secret，事件选择 push。
+- GitHub：Webhook URL 填 `https://your-host/webhooks/{webhookId}`，Content type 选 `application/json`，Secret 填管理台生成或设置的 secret，事件选择 push。
 - Gitee：Webhook URL 填同一个地址，密钥填管理台 secret，选择 push 事件；推荐使用 Gitee 的签名密钥校验模式。
 
 只有 payload 中的分支等于仓库配置的触发分支时，任务才会入队。
+
+## Secret 注入
+
+可以在 Secrets 页创建 Secret。变量名必须是合法环境变量名，例如 `DATABASE_URL` 或 `API_TOKEN`。Secret 值会加密保存到 SQLite，只在部署进程中以环境变量形式暴露。
+
+环境级全局 Secret 对该环境下所有仓库绑定生效。仓库级 Secret 只对对应环境仓库绑定生效，并且同名时会覆盖环境级全局 Secret。部署时，Candy 会把这些 Secret 和 `CANDY_REPOSITORY_NAME` 等内置变量一起注入，脚本和应用可以通过普通环境变量读取。
 
 ## Runner 约定
 

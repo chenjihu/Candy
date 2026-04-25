@@ -13,7 +13,9 @@ const emptyRunner = {
 };
 
 const emptyRepo = {
-  name: '',
+  sourceMode: 'new',
+  repositorySourceId: '',
+  sourceName: '',
   provider: 'github',
   repoUrl: '',
   webhookSecret: '',
@@ -21,11 +23,21 @@ const emptyRepo = {
   workDir: '',
   deployKey: '',
   deployScript: 'set -e\nnpm ci\nnpm run build\n',
-  runnerId: null,
+  runnerId: '',
   cleanWorktree: true
 };
 
+const emptySecret = {
+  name: '',
+  value: '',
+  repositoryId: ''
+};
+
+const FEEDBACK_AUTO_CLOSE_MS = 4000;
+const ENVIRONMENT_COLOR_OPTIONS = ['#D83B53', '#1F8E5E', '#2C99F0', '#B27300', '#7C3AED'];
+
 const LOCALE_STORAGE_KEY = 'candy.locale';
+const SELECTED_ENVIRONMENT_STORAGE_KEY = 'candy.selectedEnvironmentId';
 
 const I18N = {
   en: {
@@ -38,7 +50,9 @@ const I18N = {
     common: {
       back: 'Back',
       cancel: 'Cancel',
+      clear: 'Clear',
       close: 'Close',
+      current: 'Current',
       copy: 'Copy',
       copied: 'Copied',
       create: 'Create',
@@ -47,6 +61,7 @@ const I18N = {
       logout: 'Logout',
       loading: 'Loading...',
       saving: 'Saving...',
+      save: 'Save',
       trigger: 'Trigger',
       test: 'Test',
       update: 'Update',
@@ -55,7 +70,8 @@ const I18N = {
       noData: '-',
       noCommitMessage: 'No commit message',
       notSet: 'Not set',
-      latest: 'latest'
+      latest: 'latest',
+      search: 'Search'
     },
     locale: {
       switchLabel: 'Switch language',
@@ -66,6 +82,10 @@ const I18N = {
       invalidJson: 'The interface returned invalid JSON: HTTP {status}',
       nonJson: 'The interface returned a non-JSON response: {value}',
       copyFailed: 'Copy failed. Please copy it manually.'
+    },
+    select: {
+      noResults: 'No matching options',
+      placeholder: 'Select an option'
     },
     status: {
       succeeded: 'Succeeded',
@@ -86,6 +106,9 @@ const I18N = {
     },
     notifications: {
       copiedLabel: '{label} copied',
+      environmentCreated: 'Environment created',
+      environmentUpdated: 'Environment updated',
+      environmentDeleted: 'Environment deleted',
       repoDeleted: 'Repository deleted',
       runnerDeleted: 'Runner deleted',
       queued: '{name} added to the queue',
@@ -95,6 +118,9 @@ const I18N = {
       repoCreated: 'Repository created',
       runnerSaved: 'Runner configuration updated',
       runnerCreated: 'Runner created',
+      secretCreated: 'Secret created',
+      secretSaved: 'Secret updated',
+      secretDeleted: 'Secret deleted',
       directoryCopied: 'Directory command copied',
       sshCopied: 'SSH command copied',
       installCopied: 'Installation command copied',
@@ -112,10 +138,16 @@ const I18N = {
       hintSuffix: '. The password is configured on the server. Failed sign-ins trigger a temporary lock to prevent brute-force attacks.'
     },
     dashboard: {
+      header: {
+        environment: 'Environment',
+        environmentEmpty: 'No environments',
+        manageEnvironments: 'Manage environments'
+      },
       tabs: {
         overview: 'Overview',
         repositories: 'Repos',
         runners: 'Runners',
+        secrets: 'Secrets',
         logs: 'Logs'
       },
       metrics: {
@@ -150,6 +182,23 @@ const I18N = {
         emptyTitle: 'Using the local Runner by default',
         emptyBody: 'Add an SSH Runner if you need remote execution.'
       },
+      secrets: {
+        title: 'Secrets',
+        description: 'Inject encrypted values into deployments as environment variables.',
+        add: 'Add Secret',
+        edit: 'Update Secret',
+        emptyTitle: 'No Secrets yet',
+        emptyBody: 'Add API keys, tokens, or passwords that deployment scripts and applications can read from the environment.',
+        name: 'Variable name',
+        value: 'Value',
+        valueEditHelp: 'Leave blank to keep the existing value.',
+        scope: 'Scope',
+        globalScope: 'Global',
+        globalDescription: 'Available to every repository.',
+        repositoryScope: 'Repository',
+        repositoryPlaceholder: 'All repositories',
+        cancelEdit: 'Cancel edit'
+      },
       logs: {
         filterPlaceholder: 'Filter by repository...',
         dateAny: 'Any date',
@@ -169,28 +218,62 @@ const I18N = {
         backToHistory: 'Back to history'
       }
     },
+    environments: {
+      title: 'Manage environments',
+      description: 'Create, edit, and remove deployment environments.',
+      create: 'New environment',
+      empty: 'No environments',
+      name: 'Name',
+      slug: 'Slug',
+      descriptionLabel: 'Description',
+      color: 'Color',
+      saveCreate: 'Create environment',
+      saveUpdate: 'Save changes',
+      delete: 'Delete environment',
+      cannotDelete: 'Delete is available only for empty environments.',
+      slugHelp: 'For stable environment identification.',
+      productionHint: 'Built-in production environment',
+      testingHint: 'Built-in testing environment'
+    },
     repository: {
       back: 'Back',
       titleCreate: 'Add repository',
       titleEdit: 'Edit repository',
-      description: 'Configure the Git repository, Webhook, and deployment script.',
+      description: 'Bind a repository source to the selected environment and configure deployment details.',
       basicKicker: 'Basic Information',
-      basicTitle: 'Basic information',
-      basicDescription: 'Repository name, platform, and trigger branch.',
-      name: 'Repository name',
-      platform: 'Platform',
+      basicTitle: 'Environment binding',
+      basicDescription: 'These settings belong to the selected environment only.',
+      platform: 'Source provider',
       branch: 'Default branch',
       providerGithub: 'GitHub',
       providerGitee: 'Gitee',
       providerGeneric: 'Auto-detect',
-      configKicker: 'Repository Configuration',
-      configTitle: 'Repository configuration',
-      configDescription: 'Use the SSH URL to fetch code and store the deployment key.',
+      sourceKicker: 'Repository Source',
+      sourceTitle: 'Repository source',
+      sourceDescription: 'Repository sources are global and can be reused across environments.',
+      sourceMode: 'Source mode',
+      sourceModeExisting: 'Use existing source',
+      sourceModeNew: 'Create source',
+      sourceSelect: 'Repository source',
+      sourceSelectPlaceholder: 'Choose a repository source',
+      sourceName: 'Source name',
+      sourceSharedHelp: 'The selected source keeps the shared repository URL and deployment key.',
+      sourceEmptyTitle: 'No repository sources yet',
+      sourceEmptyBody: 'Create a source here, then bind it to the selected environment.',
+      sourceSummary: 'Selected source',
+      sourceCreateSummary: 'New source details',
+      configKicker: 'Source Details',
+      configTitle: 'Source details',
+      configDescription: 'Use the SSH URL to fetch code and store the shared deployment key.',
       sshUrl: 'Repository SSH URL',
       deploymentKey: 'Deployment key (private key)',
-      deploymentKeyHelp: 'Used by the central service to fetch repository code over SSH.',
+      deploymentKeyHelp: 'Used by the central service to fetch repository code over SSH. This value is shared by every environment bound to the same source.',
       deploymentKeyPlaceholderNew: '-----BEGIN OPENSSH PRIVATE KEY-----',
       deploymentKeyPlaceholderEdit: 'Leave blank to keep unchanged',
+      deploymentKeyConfigured: 'Configured',
+      deploymentKeyMissing: 'Not configured',
+      bindingEnvironment: 'Environment',
+      bindingEnvironmentHelp: 'This binding will be created in the selected environment.',
       workDir: 'Working directory',
       runnerKicker: 'Runner Selection',
       runnerTitle: 'Execution target',
@@ -215,6 +298,7 @@ const I18N = {
       deploymentDescription: 'The script runs inside the selected Runner’s working directory.',
       bashScript: 'Bash script',
       cleanWorktree: 'Clean worktree before deployment',
+      noEnvironmentSelected: 'Select an environment before saving a repository binding.',
       saveCreate: 'Create repository',
       saveUpdate: 'Update repository',
       cancel: 'Cancel'
@@ -275,7 +359,10 @@ const I18N = {
       back: 'Back to dashboard'
     },
     labels: {
+      environment: 'Environment',
       runner: 'Runner',
+      repositorySource: 'Repository source',
+      secretScope: 'Scope',
       duration: 'Duration',
       status: 'Status',
       repositoryUrl: 'Repository URL',
@@ -309,7 +396,9 @@ const I18N = {
     common: {
       back: '返回',
       cancel: '取消',
+      clear: '清空',
       close: '关闭',
+      current: '当前',
       copy: '复制',
       copied: '已复制',
       create: '创建',
@@ -318,6 +407,7 @@ const I18N = {
       logout: '退出',
       loading: '加载中...',
       saving: '保存中...',
+      save: '保存',
       trigger: '触发',
       test: '测试',
       update: '更新',
@@ -326,7 +416,8 @@ const I18N = {
       noData: '-',
       noCommitMessage: '无提交信息',
       notSet: '未设置',
-      latest: '最新'
+      latest: '最新',
+      search: '搜索'
     },
     locale: {
       switchLabel: '切换语言',
@@ -337,6 +428,10 @@ const I18N = {
       invalidJson: '接口返回了无法解析的 JSON：HTTP {status}',
       nonJson: '接口返回了非 JSON 响应：{value}',
       copyFailed: '复制失败，请手动复制。'
+    },
+    select: {
+      noResults: '没有匹配项',
+      placeholder: '请选择'
     },
     status: {
       succeeded: '已成功',
@@ -357,6 +452,9 @@ const I18N = {
     },
     notifications: {
       copiedLabel: '{label} 已复制',
+      environmentCreated: '环境已创建',
+      environmentUpdated: '环境已更新',
+      environmentDeleted: '环境已删除',
       repoDeleted: '仓库已删除',
       runnerDeleted: 'Runner 已删除',
       queued: '{name} 已进入队列',
@@ -366,6 +464,9 @@ const I18N = {
       repoCreated: '仓库已创建',
       runnerSaved: 'Runner 配置已更新',
       runnerCreated: 'Runner 已创建',
+      secretCreated: 'Secret 已创建',
+      secretSaved: 'Secret 已更新',
+      secretDeleted: 'Secret 已删除',
       directoryCopied: '目录命令已复制',
       sshCopied: 'SSH 命令已复制',
       installCopied: '安装命令已复制',
@@ -383,10 +484,16 @@ const I18N = {
       hintSuffix: '，密码由服务端配置。登录失败会触发临时锁定，防止暴力破解。'
     },
     dashboard: {
+    header: {
+      environment: '环境',
+      environmentEmpty: '暂无环境',
+      manageEnvironments: '管理环境'
+    },
     tabs: {
       overview: '总览',
       repositories: '仓库',
       runners: 'Runners',
+      secrets: 'Secrets',
       logs: '日志'
     },
       metrics: {
@@ -421,6 +528,23 @@ const I18N = {
         emptyTitle: '默认使用本机 Runner',
         emptyBody: '需要远端执行时，再添加 SSH Runner 即可。'
       },
+      secrets: {
+        title: 'Secrets',
+        description: '以环境变量方式向部署过程注入加密保存的敏感值。',
+        add: '添加 Secret',
+        edit: '更新 Secret',
+        emptyTitle: '还没有 Secret',
+        emptyBody: '添加 API Key、Token 或密码，部署脚本和应用可以从环境变量中读取。',
+        name: '变量名',
+        value: '值',
+        valueEditHelp: '留空表示不修改已有值。',
+        scope: '作用域',
+        globalScope: '全局',
+        globalDescription: '对所有仓库生效。',
+        repositoryScope: '仓库',
+        repositoryPlaceholder: '全部仓库',
+        cancelEdit: '取消编辑'
+      },
       logs: {
         filterPlaceholder: '按仓库筛选...',
         dateAny: '任意日期',
@@ -440,28 +564,62 @@ const I18N = {
         backToHistory: '返回历史'
       }
     },
+    environments: {
+      title: '管理环境',
+      description: '创建、编辑和删除部署环境。',
+      create: '新建环境',
+      empty: '暂无环境',
+      name: '名称',
+      slug: '标识',
+      descriptionLabel: '描述',
+      color: '颜色',
+      saveCreate: '创建环境',
+      saveUpdate: '保存修改',
+      delete: '删除环境',
+      cannotDelete: '只有空环境才允许删除。',
+      slugHelp: '用于系统内部稳定识别环境。',
+      productionHint: '系统内置的生产环境',
+      testingHint: '系统内置的测试环境'
+    },
     repository: {
       back: '返回',
       titleCreate: '添加仓库',
       titleEdit: '编辑仓库',
-      description: '配置 Git 仓库、Webhook 和部署脚本。',
+      description: '把仓库源绑定到当前环境，并配置该环境下的部署细节。',
       basicKicker: '基础信息',
-      basicTitle: '基础信息',
-      basicDescription: '仓库名称、平台与触发分支。',
-      name: '仓库名称',
-      platform: '平台',
+      basicTitle: '环境绑定',
+      basicDescription: '这里的设置只作用于当前选中的环境。',
+      platform: '仓库源平台',
       branch: '默认分支',
       providerGithub: 'GitHub',
       providerGitee: 'Gitee',
       providerGeneric: '自动识别',
-      configKicker: '仓库配置',
-      configTitle: '仓库配置',
-      configDescription: '使用 SSH 地址拉取代码，并保存 deployment key。',
+      sourceKicker: '仓库源',
+      sourceTitle: '仓库源',
+      sourceDescription: '仓库源是全局资源，可以被多个环境复用。',
+      sourceMode: '仓库源模式',
+      sourceModeExisting: '使用已有仓库源',
+      sourceModeNew: '创建新仓库源',
+      sourceSelect: '仓库源',
+      sourceSelectPlaceholder: '选择仓库源',
+      sourceName: '仓库源名称',
+      sourceSharedHelp: '选中的仓库源会复用共享的仓库地址和部署密钥。',
+      sourceEmptyTitle: '还没有仓库源',
+      sourceEmptyBody: '可以先在这里创建一个仓库源，再绑定到当前环境。',
+      sourceSummary: '已选仓库源',
+      sourceCreateSummary: '新仓库源信息',
+      configKicker: '仓库源详情',
+      configTitle: '仓库源详情',
+      configDescription: '使用 SSH 地址拉取代码，并保存共享的 deployment key。',
       sshUrl: '仓库 SSH 地址',
       deploymentKey: '部署密钥（私钥）',
-      deploymentKeyHelp: '用于中心服务通过 SSH 拉取仓库代码。',
+      deploymentKeyHelp: '用于中心服务通过 SSH 拉取仓库代码。同一个仓库源绑定到多个环境时会共享这个值。',
       deploymentKeyPlaceholderNew: '-----BEGIN OPENSSH PRIVATE KEY-----',
       deploymentKeyPlaceholderEdit: '留空表示不修改',
+      deploymentKeyConfigured: '已配置',
+      deploymentKeyMissing: '未配置',
+      bindingEnvironment: '环境',
+      bindingEnvironmentHelp: '这个绑定会创建在当前选中的环境中。',
       workDir: '工作目录',
       runnerKicker: 'Runner',
       runnerTitle: 'Runner',
@@ -486,6 +644,7 @@ const I18N = {
       deploymentDescription: '脚本会在对应 Runner 的工作目录内执行。',
       bashScript: 'Bash 脚本',
       cleanWorktree: '部署前清理 worktree',
+      noEnvironmentSelected: '保存仓库绑定前请先选择环境。',
       saveCreate: '创建仓库',
       saveUpdate: '更新仓库',
       cancel: '取消'
@@ -546,7 +705,10 @@ const I18N = {
       back: '回到控制台'
     },
     labels: {
+      environment: '环境',
       runner: 'Runner',
+      repositorySource: '仓库源',
+      secretScope: '作用域',
       duration: '时长',
       status: '状态',
       repositoryUrl: '仓库地址',
@@ -587,12 +749,49 @@ function readInitialLocale() {
   }
 }
 
+function readStoredEnvironmentId() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  try {
+    return window.localStorage.getItem(SELECTED_ENVIRONMENT_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
 function getRuntimeLocale() {
   if (typeof window === 'undefined') {
     return 'en';
   }
 
   return window.__candyLocale === 'zh' ? 'zh' : 'en';
+}
+
+function normalizeEnvironmentColor(value) {
+  const trimmed = String(value || '').trim();
+  if (!/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) {
+    return '#EF3150';
+  }
+  if (trimmed.length === 4) {
+    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`.toUpperCase();
+  }
+  return trimmed.toUpperCase();
+}
+
+function environmentShellStyle(environment) {
+  const color = normalizeEnvironmentColor(environment?.color);
+  const red = Number.parseInt(color.slice(1, 3), 16);
+  const green = Number.parseInt(color.slice(3, 5), 16);
+  const blue = Number.parseInt(color.slice(5, 7), 16);
+
+  return {
+    '--environment-accent': color,
+    '--environment-accent-soft': `rgba(${red}, ${green}, ${blue}, 0.08)`,
+    '--environment-accent-strong': `rgba(${red}, ${green}, ${blue}, 0.18)`,
+    '--environment-accent-line': `rgba(${red}, ${green}, ${blue}, 0.16)`
+  };
 }
 
 function resolvePath(object, path) {
@@ -727,6 +926,14 @@ function randomSecret(length = 24) {
   return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
 }
 
+function slugifyEnvironmentName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function statusMeta(locale, status) {
   switch (status) {
     case 'succeeded':
@@ -798,6 +1005,66 @@ function CopyIcon() {
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" className={className}>
+      <path
+        d="M3.75 6L8 10.25L12.25 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SearchIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" className={className}>
+      <circle cx="9" cy="9" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M13.5 13.5L17 17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" className={className}>
+      <path
+        d="M3.5 8.25L6.5 11.25L12.5 5.25"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" className={className}>
+      <path
+        d="M4 4L12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 4L4 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
       />
     </svg>
   );
@@ -950,21 +1217,35 @@ function firstLine(value) {
   return value.split('\n').map((item) => item.trim()).find(Boolean) || '';
 }
 
-function createRepoForm(repo) {
+function createRepoForm(repo, repositorySources = []) {
+  const matchedSource = repo
+    ? repositorySources.find((source) => source.id === repo.repositorySourceId)
+    : repositorySources[0] || null;
+
   if (!repo) {
-    return { ...emptyRepo, webhookSecret: randomSecret() };
+    return {
+      ...emptyRepo,
+      sourceMode: matchedSource ? 'existing' : 'new',
+      repositorySourceId: matchedSource?.id || '',
+      provider: matchedSource?.provider || emptyRepo.provider,
+      repoUrl: matchedSource?.repoUrl || '',
+      webhookSecret: randomSecret(),
+      runnerId: ''
+    };
   }
 
   return {
-    name: repo.name || '',
-    provider: repo.provider || 'github',
-    repoUrl: repo.repoUrl || '',
+    sourceMode: matchedSource ? 'existing' : 'new',
+    repositorySourceId: repo.repositorySourceId || matchedSource?.id || '',
+    sourceName: matchedSource?.name || repo.name || '',
+    provider: matchedSource?.provider || repo.provider || 'github',
+    repoUrl: matchedSource?.repoUrl || repo.repoUrl || '',
     webhookSecret: repo.webhookSecret || randomSecret(),
     branch: repo.branch || 'main',
     workDir: repo.workDir || '',
     deployKey: '',
     deployScript: repo.deployScript || emptyRepo.deployScript,
-    runnerId: repo.runnerId ? String(repo.runnerId) : null,
+    runnerId: repo.runnerId ? String(repo.runnerId) : '',
     cleanWorktree: repo.cleanWorktree ?? true
   };
 }
@@ -992,8 +1273,12 @@ function App() {
 
   const [user, setUser] = useState(null);
   const [booting, setBooting] = useState(true);
+  const [environments, setEnvironments] = useState([]);
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState(readStoredEnvironmentId);
+  const [repositorySources, setRepositorySources] = useState([]);
   const [runners, setRunners] = useState([]);
   const [repos, setRepos] = useState([]);
+  const [secrets, setSecrets] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [selectedJob, setSelectedJob] = useState(null);
   const [logs, setLogs] = useState([]);
@@ -1017,6 +1302,15 @@ function App() {
 
   const t = useCallback((key, values) => translate(locale, key, values), [locale]);
   const i18nValue = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
+  const selectedEnvironment = useMemo(
+    () => environments.find((environment) => environment.id === selectedEnvironmentId) || null,
+    [environments, selectedEnvironmentId]
+  );
+  const selectedEnvironmentIdRef = useRef(selectedEnvironmentId);
+
+  useEffect(() => {
+    selectedEnvironmentIdRef.current = selectedEnvironmentId;
+  }, [selectedEnvironmentId]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1030,15 +1324,92 @@ function App() {
     }
   }, [locale]);
 
-  const refreshData = useCallback(async () => {
-    const [runnerData, repoData, jobData] = await Promise.all([
-      api('/api/runners'),
-      api('/api/repositories'),
-      api('/api/jobs')
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      if (selectedEnvironmentId) {
+        window.localStorage.setItem(SELECTED_ENVIRONMENT_STORAGE_KEY, selectedEnvironmentId);
+      } else {
+        window.localStorage.removeItem(SELECTED_ENVIRONMENT_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage failures and keep the in-memory selection.
+    }
+  }, [selectedEnvironmentId]);
+
+  useEffect(() => {
+    if (!notice && !error) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      clearMessages();
+    }, FEEDBACK_AUTO_CLOSE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [notice, error, clearMessages]);
+
+  const refreshData = useCallback(async (preferredEnvironmentId) => {
+    const environmentData = await api('/api/environments');
+    const nextEnvironments = Array.isArray(environmentData) ? environmentData : [];
+    setEnvironments(nextEnvironments);
+
+    const requestedEnvironmentId = preferredEnvironmentId
+      || selectedEnvironmentIdRef.current
+      || readStoredEnvironmentId();
+    const nextEnvironment = nextEnvironments.find((environment) => environment.id === requestedEnvironmentId)
+      || nextEnvironments[0]
+      || null;
+    const nextEnvironmentId = nextEnvironment?.id || '';
+
+    if (nextEnvironmentId !== selectedEnvironmentIdRef.current) {
+      setSelectedEnvironmentId(nextEnvironmentId);
+    }
+
+    const sourcePromise = api('/api/repository-sources');
+
+    if (!nextEnvironmentId) {
+      const sourceData = await sourcePromise;
+      setRepositorySources(Array.isArray(sourceData) ? sourceData : []);
+      setRunners([]);
+      setRepos([]);
+      setSecrets([]);
+      setJobs([]);
+      setSelectedJob(null);
+      setLogs([]);
+      return;
+    }
+
+    const query = `?environmentId=${encodeURIComponent(nextEnvironmentId)}`;
+    const [runnerData, repoData, secretData, jobData, sourceData] = await Promise.all([
+      api(`/api/runners${query}`),
+      api(`/api/repositories${query}`),
+      api(`/api/secrets${query}`),
+      api(`/api/jobs${query}`),
+      sourcePromise
     ]);
-    setRunners(runnerData || []);
-    setRepos(repoData || []);
-    setJobs(jobData || []);
+
+    const nextJobs = Array.isArray(jobData) ? jobData : [];
+    setRepositorySources(Array.isArray(sourceData) ? sourceData : []);
+    setRunners(Array.isArray(runnerData) ? runnerData : []);
+    setRepos(Array.isArray(repoData) ? repoData : []);
+    setSecrets(Array.isArray(secretData) ? secretData : []);
+    setJobs(nextJobs);
+    setSelectedJob((current) => {
+      if (!current) {
+        return null;
+      }
+      const nextJob = nextJobs.find((job) => job.id === current.id) || null;
+      if (!nextJob) {
+        setLogs([]);
+      }
+      return nextJob;
+    });
   }, []);
 
   const loadJobLogs = useCallback(async (job) => {
@@ -1095,21 +1466,30 @@ function App() {
     }
 
     let active = true;
-    refreshData().catch((err) => {
+    refreshData(selectedEnvironmentId).catch((err) => {
       if (active) {
         showError(err.message);
       }
     });
 
+    return () => {
+      active = false;
+    };
+  }, [user, refreshData, showError]);
+
+  useEffect(() => {
+    if (!user) {
+      return undefined;
+    }
+
     const timer = window.setInterval(() => {
-      refreshData().catch(() => {});
+      refreshData(selectedEnvironmentId).catch(() => {});
     }, 5000);
 
     return () => {
-      active = false;
       window.clearInterval(timer);
     };
-  }, [user, refreshData, showError]);
+  }, [user, refreshData, selectedEnvironmentId]);
 
   async function handleLoginSuccess(data) {
     clearMessages();
@@ -1126,8 +1506,12 @@ function App() {
     clearMessages();
     setSelectedJob(null);
     setLogs([]);
+    setEnvironments([]);
+    setRepositorySources([]);
+    setSelectedEnvironmentId('');
     setRunners([]);
     setRepos([]);
+    setSecrets([]);
     setJobs([]);
     setUser(null);
     navigate('/login', { replace: true });
@@ -1143,6 +1527,19 @@ function App() {
     showNotice(message);
     await refreshData();
     navigate('/dashboard?tab=runners', { replace: true });
+  }
+
+  async function handleEnvironmentChange(nextEnvironmentId) {
+    clearMessages();
+    setSelectedJob(null);
+    setLogs([]);
+    setSelectedEnvironmentId(nextEnvironmentId);
+
+    try {
+      await refreshData(nextEnvironmentId);
+    } catch (err) {
+      showError(err.message);
+    }
   }
 
   if (booting) {
@@ -1175,8 +1572,12 @@ function App() {
       <I18NContext.Provider value={i18nValue}>
         <DashboardPage
           user={user}
+          environments={environments}
+          selectedEnvironment={selectedEnvironment}
+          selectedEnvironmentId={selectedEnvironmentId}
           runners={runners}
           repos={repos}
+          secrets={secrets}
           jobs={jobs}
           selectedJob={selectedJob}
           logs={logs}
@@ -1189,6 +1590,7 @@ function App() {
           search={location.search}
           refreshData={refreshData}
           loadJobLogs={loadJobLogs}
+          onEnvironmentChange={handleEnvironmentChange}
           onLogout={handleLogout}
         />
       </I18NContext.Provider>
@@ -1200,7 +1602,9 @@ function App() {
       <I18NContext.Provider value={i18nValue}>
         <RepositoryPage
           repos={repos}
+          repositorySources={repositorySources}
           runners={runners}
+          selectedEnvironment={selectedEnvironment}
           notice={notice}
           error={error}
           clearMessages={clearMessages}
@@ -1219,6 +1623,7 @@ function App() {
       <I18NContext.Provider value={i18nValue}>
         <RunnerPage
           runners={runners}
+          selectedEnvironment={selectedEnvironment}
           notice={notice}
           error={error}
           clearMessages={clearMessages}
@@ -1325,8 +1730,12 @@ function LoginPage({ onLogin, error, setError }) {
 
 function DashboardPage({
   user,
+  environments,
+  selectedEnvironment,
+  selectedEnvironmentId,
   runners,
   repos,
+  secrets,
   jobs,
   selectedJob,
   logs,
@@ -1337,7 +1746,9 @@ function DashboardPage({
   setError,
   navigate,
   search,
+  refreshData,
   loadJobLogs,
+  onEnvironmentChange,
   onLogout
 }) {
   const { t, locale } = useI18n();
@@ -1346,6 +1757,36 @@ function DashboardPage({
   const [tab, setTab] = useState(requestedTab);
   const [jobFilter, setJobFilter] = useState('');
   const [jobDate, setJobDate] = useState('');
+  const [secretForm, setSecretForm] = useState(emptySecret);
+  const [editingSecretId, setEditingSecretId] = useState(null);
+  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false);
+  const [editingEnvironmentId, setEditingEnvironmentId] = useState(selectedEnvironmentId);
+  const [environmentForm, setEnvironmentForm] = useState({
+    name: '',
+    slug: '',
+    description: '',
+    color: ENVIRONMENT_COLOR_OPTIONS[0]
+  });
+  const [environmentSaving, setEnvironmentSaving] = useState(false);
+
+  useEffect(() => {
+    if (!environmentModalOpen) {
+      return;
+    }
+    if (!editingEnvironmentId) {
+      return;
+    }
+    const match = environments.find((environment) => environment.id === editingEnvironmentId) || null;
+    if (!match) {
+      return;
+    }
+    setEnvironmentForm({
+      name: match?.name || '',
+      slug: match?.slug || '',
+      description: match?.description || '',
+      color: match?.color || ENVIRONMENT_COLOR_OPTIONS[0]
+    });
+  }, [editingEnvironmentId, environmentModalOpen, environments]);
 
   useEffect(() => {
     setTab(requestedTab);
@@ -1409,6 +1850,145 @@ function DashboardPage({
     }
   }
 
+  async function saveSecret(event) {
+    event.preventDefault();
+    try {
+      const payload = {
+        name: secretForm.name.trim().toUpperCase(),
+        value: secretForm.value,
+        repositoryId: secretForm.repositoryId ? Number(secretForm.repositoryId) : null
+      };
+      if (editingSecretId) {
+        await api(`/api/secrets/${editingSecretId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        setNotice(t('notifications.secretSaved'));
+      } else {
+        await api('/api/secrets', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        setNotice(t('notifications.secretCreated'));
+      }
+      setSecretForm(emptySecret);
+      setEditingSecretId(null);
+      await refreshData();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteSecret(id) {
+    try {
+      await api(`/api/secrets/${id}`, { method: 'DELETE' });
+      setNotice(t('notifications.secretDeleted'));
+      if (editingSecretId === id) {
+        setSecretForm(emptySecret);
+        setEditingSecretId(null);
+      }
+      await refreshData();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function editSecret(secret) {
+    setEditingSecretId(secret.id);
+    setSecretForm({
+      name: secret.name || '',
+      value: '',
+      repositoryId: secret.repositoryId ? String(secret.repositoryId) : ''
+    });
+  }
+
+  function cancelSecretEdit() {
+    setSecretForm(emptySecret);
+    setEditingSecretId(null);
+  }
+
+  function openEnvironmentManager() {
+    const nextEditingId = selectedEnvironmentId || environments[0]?.id || '';
+    const match = environments.find((environment) => environment.id === nextEditingId) || null;
+    setEditingEnvironmentId(nextEditingId);
+    setEnvironmentForm({
+      name: match?.name || '',
+      slug: match?.slug || '',
+      description: match?.description || '',
+      color: match?.color || ENVIRONMENT_COLOR_OPTIONS[0]
+    });
+    setEnvironmentModalOpen(true);
+  }
+
+  function selectEnvironmentForEdit(environment) {
+    setEditingEnvironmentId(environment.id);
+    setEnvironmentForm({
+      name: environment.name || '',
+      slug: environment.slug || '',
+      description: environment.description || '',
+      color: environment.color || ENVIRONMENT_COLOR_OPTIONS[0]
+    });
+  }
+
+  function startCreateEnvironment() {
+    setEditingEnvironmentId('');
+    setEnvironmentForm({
+      name: '',
+      slug: '',
+      description: '',
+      color: ENVIRONMENT_COLOR_OPTIONS[1]
+    });
+  }
+
+  async function saveEnvironment(event) {
+    event.preventDefault();
+    setEnvironmentSaving(true);
+
+    const payload = {
+      name: environmentForm.name.trim(),
+      slug: slugifyEnvironmentName(environmentForm.slug || environmentForm.name),
+      description: environmentForm.description.trim(),
+      color: environmentForm.color
+    };
+
+    try {
+      if (editingEnvironmentId) {
+        await api(`/api/environments/${editingEnvironmentId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        setNotice(t('notifications.environmentUpdated'));
+        await refreshData(editingEnvironmentId);
+      } else {
+        const created = await api('/api/environments', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        setNotice(t('notifications.environmentCreated'));
+        await refreshData(created?.id);
+        setEditingEnvironmentId(created?.id || '');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setEnvironmentSaving(false);
+    }
+  }
+
+  async function deleteEnvironment() {
+    if (!editingEnvironmentId) {
+      return;
+    }
+    try {
+      await api(`/api/environments/${editingEnvironmentId}`, { method: 'DELETE' });
+      setNotice(t('notifications.environmentDeleted'));
+      setEnvironmentModalOpen(false);
+      await refreshData();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function triggerRepository(repo) {
     try {
       await api(`/api/repositories/${repo.id}/trigger`, { method: 'POST', body: '{}' });
@@ -1434,11 +2014,24 @@ function DashboardPage({
   }
 
   return (
-    <div className="dashboard-shell">
+    <div className="dashboard-shell environment-shell" style={environmentShellStyle(selectedEnvironment)}>
       <header className="topbar">
         <div className="content-width topbar-inner">
           <BrandLockup />
           <div className="topbar-actions">
+            <EnvironmentSwitcher
+              environments={environments}
+              selectedEnvironmentId={selectedEnvironmentId}
+              onChange={onEnvironmentChange}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="environment-manage-button"
+              onClick={openEnvironmentManager}
+            >
+              {t('dashboard.header.manageEnvironments')}
+            </Button>
             <LocaleSwitch />
             <Button
               variant="ghost"
@@ -1465,6 +2058,7 @@ function DashboardPage({
             { value: 'overview', label: t('dashboard.tabs.overview') },
             { value: 'repositories', label: t('dashboard.tabs.repositories') },
             { value: 'runners', label: t('dashboard.tabs.runners') },
+            { value: 'secrets', label: t('dashboard.tabs.secrets') },
             { value: 'logs', label: t('dashboard.tabs.logs') }
           ].map((item) => (
             <button
@@ -1614,6 +2208,81 @@ function DashboardPage({
           </section>
         )}
 
+        {tab === 'secrets' && (
+          <section className="section-stack">
+            <SectionTitle
+              title={t('dashboard.secrets.title')}
+              description={t('dashboard.secrets.description')}
+            />
+
+            <Card className="panel-card">
+              <form className="form-grid two" onSubmit={saveSecret}>
+                <Field label={t('dashboard.secrets.name')}>
+                  <input
+                    className="input mono"
+                    value={secretForm.name}
+                    placeholder="DATABASE_URL"
+                    onChange={(event) => setSecretForm({ ...secretForm, name: event.target.value.toUpperCase() })}
+                  />
+                </Field>
+
+                <Field
+                  label={t('dashboard.secrets.value')}
+                  help={editingSecretId ? t('dashboard.secrets.valueEditHelp') : ''}
+                >
+                  <input
+                    className="input mono"
+                    type="password"
+                    value={secretForm.value}
+                    autoComplete="off"
+                    onChange={(event) => setSecretForm({ ...secretForm, value: event.target.value })}
+                  />
+                </Field>
+
+                <Field label={t('dashboard.secrets.scope')}>
+                  <Select
+                    value={secretForm.repositoryId}
+                    onChange={(nextValue) => setSecretForm({ ...secretForm, repositoryId: nextValue })}
+                    options={[
+                      { value: '', label: t('dashboard.secrets.repositoryPlaceholder'), badge: 'ALL' },
+                      ...repos.map((repo) => ({ value: repo.id, label: repo.name, badge: 'REPO' }))
+                    ]}
+                  />
+                </Field>
+
+                <div className="form-actions secret-form-actions">
+                  <Button type="submit">
+                    {editingSecretId ? t('dashboard.secrets.edit') : t('dashboard.secrets.add')}
+                  </Button>
+                  {editingSecretId && (
+                    <Button type="button" variant="outline" onClick={cancelSecretEdit}>
+                      {t('dashboard.secrets.cancelEdit')}
+                    </Button>
+                  )}
+                </div>
+              </form>
+            </Card>
+
+            {secrets.length ? (
+              <div className="secret-list">
+                {secrets.map((secret) => (
+                  <SecretCard
+                    key={secret.id}
+                    secret={secret}
+                    onEdit={() => editSecret(secret)}
+                    onDelete={() => deleteSecret(secret.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title={t('dashboard.secrets.emptyTitle')}
+                body={t('dashboard.secrets.emptyBody')}
+              />
+            )}
+          </section>
+        )}
+
         {tab === 'logs' && (
           <section className="section-stack">
             <div className="job-tools">
@@ -1714,13 +2383,31 @@ function DashboardPage({
           </Button>
         </div>
       </footer>
+
+      {environmentModalOpen && (
+        <EnvironmentManagerModal
+          environments={environments}
+          selectedEnvironmentId={selectedEnvironmentId}
+          editingEnvironmentId={editingEnvironmentId}
+          form={environmentForm}
+          saving={environmentSaving}
+          onClose={() => setEnvironmentModalOpen(false)}
+          onSelectEnvironment={selectEnvironmentForEdit}
+          onCreateNew={startCreateEnvironment}
+          onFormChange={setEnvironmentForm}
+          onSave={saveEnvironment}
+          onDelete={deleteEnvironment}
+        />
+      )}
     </div>
   );
 }
 
 function RepositoryPage({
   repos,
+  repositorySources,
   runners,
+  selectedEnvironment,
   notice,
   error,
   clearMessages,
@@ -1739,16 +2426,67 @@ function RepositoryPage({
     [editId, repos]
   );
 
-  const [form, setForm] = useState(() => createRepoForm(editingRepo));
+  const [form, setForm] = useState(() => createRepoForm(editingRepo, repositorySources));
   const [copied, setCopied] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const selectedSource = useMemo(
+    () => repositorySources.find((source) => source.id === form.repositorySourceId) || null,
+    [form.repositorySourceId, repositorySources]
+  );
+  const providerOptions = useMemo(() => ([
+    { value: 'github', label: t('repository.providerGithub'), badge: 'GH' },
+    { value: 'gitee', label: t('repository.providerGitee'), badge: 'GI' },
+    { value: 'generic', label: t('repository.providerGeneric'), badge: '::' }
+  ]), [t]);
+  const repositorySourceOptions = useMemo(
+    () => repositorySources.map((source) => ({
+      value: source.id,
+      label: source.name,
+      provider: providerLabel(locale, source.provider),
+      description: source.repoUrl,
+      hasDeployKey: source.hasDeployKey
+    })),
+    [locale, repositorySources]
+  );
 
   useEffect(() => {
-    setForm(createRepoForm(editingRepo));
-  }, [editingRepo, editId]);
+    if (editingRepo) {
+      setForm(createRepoForm(editingRepo, repositorySources));
+      return;
+    }
+
+    setForm((current) => {
+      if (current.repositorySourceId || current.sourceName || current.repoUrl) {
+        return current;
+      }
+      return createRepoForm(null, repositorySources);
+    });
+  }, [editId, editingRepo?.id, editingRepo?.repositorySourceId, repositorySources.length]);
 
   function regenerateSecret() {
-    setForm({ ...form, webhookSecret: randomSecret() });
+    setForm((current) => ({ ...current, webhookSecret: randomSecret() }));
+  }
+
+  function switchSourceMode(nextMode) {
+    setForm((current) => {
+      if (nextMode === 'existing') {
+        return {
+          ...current,
+          sourceMode: 'existing',
+          repositorySourceId: current.repositorySourceId || repositorySources[0]?.id || ''
+        };
+      }
+
+      const source = repositorySources.find((item) => item.id === current.repositorySourceId);
+      return {
+        ...current,
+        sourceMode: 'new',
+        repositorySourceId: '',
+        sourceName: current.sourceName || source?.name || editingRepo?.name || '',
+        provider: current.provider || source?.provider || editingRepo?.provider || 'github',
+        repoUrl: current.repoUrl || source?.repoUrl || editingRepo?.repoUrl || ''
+      };
+    });
   }
 
   async function copyValue(value, key) {
@@ -1772,16 +2510,33 @@ function RepositoryPage({
     clearMessages();
 
     try {
+      if (!selectedEnvironment?.id) {
+        throw new Error(t('repository.noEnvironmentSelected'));
+      }
+
+      let repositorySourceId = form.repositorySourceId;
+
+      if (form.sourceMode === 'new') {
+        const createdSource = await api('/api/repository-sources', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: form.sourceName.trim(),
+            provider: form.provider,
+            repoUrl: form.repoUrl.trim(),
+            deployKey: form.deployKey
+          })
+        });
+        repositorySourceId = createdSource?.id || '';
+      }
+
       const payload = {
-        name: form.name,
-        provider: form.provider,
-        repoUrl: form.repoUrl,
+        environmentId: selectedEnvironment.id,
+        repositorySourceId,
         webhookSecret: form.webhookSecret,
         branch: form.branch,
         workDir: form.workDir,
-        deployKey: form.deployKey,
         deployScript: form.deployScript,
-        runnerId: form.runnerId ? Number(form.runnerId) : null,
+        runnerId: form.runnerId || '',
         cleanWorktree: form.cleanWorktree
       };
 
@@ -1808,7 +2563,7 @@ function RepositoryPage({
   const webhookUrl = editingRepo?.webhookUrl || '';
 
   return (
-    <div className="page-shell">
+    <div className="page-shell environment-shell" style={environmentShellStyle(selectedEnvironment)}>
       <header className="subpage-header">
         <div className="content-width subpage-header-inner">
           <div className="subpage-header-actions">
@@ -1820,6 +2575,9 @@ function RepositoryPage({
           <div className="subpage-title">
             <h1>{isEditMode ? t('repository.titleEdit') : t('repository.titleCreate')}</h1>
             <p>{t('repository.description')}</p>
+            {selectedEnvironment && (
+              <EnvironmentBadge environment={selectedEnvironment} />
+            )}
           </div>
         </div>
       </header>
@@ -1836,76 +2594,173 @@ function RepositoryPage({
         <form className="form-stack" onSubmit={submit}>
           <Card className="panel-card">
             <SectionTitle
-              kicker={t('repository.basicKicker')}
-              title={t('repository.basicTitle')}
-              description={t('repository.basicDescription')}
+              title={t('repository.sourceTitle')}
+              description={t('repository.sourceDescription')}
             />
-            <div className="form-grid two">
-              <Field label={t('repository.name')}>
-                <input
-                  className="input"
-                  value={form.name}
-                  onChange={(event) => setForm({ ...form, name: event.target.value })}
-                  placeholder="frontend-app"
-                  required
-                />
-              </Field>
 
-              <Field label={t('repository.platform')}>
-                <select
-                  className="input"
-                  value={form.provider}
-                  onChange={(event) => setForm({ ...form, provider: event.target.value })}
-                >
-                  <option value="github">{t('repository.providerGithub')}</option>
-                  <option value="gitee">{t('repository.providerGitee')}</option>
-                  <option value="generic">{t('repository.providerGeneric')}</option>
-                </select>
-              </Field>
+            <div className="radio-list source-mode-list">
+              <label className={form.sourceMode === 'existing' ? 'radio-card active' : 'radio-card'}>
+                <input
+                  type="radio"
+                  name="sourceMode"
+                  checked={form.sourceMode === 'existing'}
+                  onChange={() => switchSourceMode('existing')}
+                />
+                <div>
+                  <strong>{t('repository.sourceModeExisting')}</strong>
+                  <p>{t('repository.sourceSharedHelp')}</p>
+                </div>
+              </label>
+
+              <label className={form.sourceMode === 'new' ? 'radio-card active' : 'radio-card'}>
+                <input
+                  type="radio"
+                  name="sourceMode"
+                  checked={form.sourceMode === 'new'}
+                  onChange={() => switchSourceMode('new')}
+                />
+                <div>
+                  <strong>{t('repository.sourceModeNew')}</strong>
+                  <p>{t('repository.sourceEmptyBody')}</p>
+                </div>
+              </label>
             </div>
 
-            <Field label={t('repository.branch')}>
-              <input
-                className="input"
-                value={form.branch}
-                onChange={(event) => setForm({ ...form, branch: event.target.value })}
-                placeholder="main"
-              />
-            </Field>
+            {form.sourceMode === 'existing' ? (
+              <div className="stack-gap">
+                <Field label={t('repository.sourceSelect')}>
+                  <Select
+                    variant="rich"
+                    searchable
+                    clearable
+                    value={form.repositorySourceId}
+                    placeholder={t('repository.sourceSelectPlaceholder')}
+                    onChange={(nextValue) => setForm((current) => ({ ...current, repositorySourceId: nextValue }))}
+                    options={repositorySourceOptions}
+                    getOptionSearchText={(option) => [option.label, option.provider, option.description].join(' ')}
+                    renderValue={(option) => (
+                      <span className="select-value-rich">
+                        <span className="select-value-text">
+                          <strong>{option.label}</strong>
+                          <small>{option.provider}</small>
+                        </span>
+                      </span>
+                    )}
+                    renderOption={(option, state) => (
+                      <span className="select-option-rich">
+                        <span className="select-option-copy">
+                          <strong>{option.label}</strong>
+                          <small>{option.provider} · {option.description}</small>
+                        </span>
+                        <span className="select-option-side">
+                          {option.hasDeployKey ? <Badge tone="success">KEY</Badge> : null}
+                          {state.selected ? <CheckIcon className="select-check" /> : null}
+                        </span>
+                      </span>
+                    )}
+                  />
+                </Field>
+
+                {selectedSource ? (
+                  <div className="source-summary">
+                    <div className="source-summary-head">
+                      <strong>{t('repository.sourceSummary')}</strong>
+                      <Badge tone={selectedSource.hasDeployKey ? 'success' : 'muted'}>
+                        {selectedSource.hasDeployKey ? t('repository.deploymentKeyConfigured') : t('repository.deploymentKeyMissing')}
+                      </Badge>
+                    </div>
+                    <div className="source-summary-grid">
+                      <DetailCard label={t('repository.sourceName')} value={selectedSource.name} />
+                      <DetailCard label={t('repository.platform')} value={providerLabel(locale, selectedSource.provider)} />
+                      <DetailCard label={t('repository.sshUrl')} value={selectedSource.repoUrl} />
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState
+                    compact
+                    title={t('repository.sourceEmptyTitle')}
+                    body={t('repository.sourceEmptyBody')}
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="stack-gap">
+                <div className="form-grid two">
+                  <Field label={t('repository.sourceName')}>
+                    <input
+                      className="input"
+                      value={form.sourceName}
+                      onChange={(event) => setForm((current) => ({ ...current, sourceName: event.target.value }))}
+                      placeholder="frontend-app"
+                      required={form.sourceMode === 'new'}
+                    />
+                  </Field>
+
+                  <Field label={t('repository.platform')}>
+                    <Select
+                      value={form.provider}
+                      onChange={(nextValue) => setForm((current) => ({ ...current, provider: nextValue }))}
+                      options={providerOptions}
+                    />
+                  </Field>
+                </div>
+
+                <Field label={t('repository.sshUrl')}>
+                  <input
+                    className="input"
+                    value={form.repoUrl}
+                    onChange={(event) => setForm((current) => ({ ...current, repoUrl: event.target.value }))}
+                    placeholder="git@github.com:org/repo.git"
+                    required={form.sourceMode === 'new'}
+                  />
+                </Field>
+
+                <Field label={t('repository.deploymentKey')} help={t('repository.deploymentKeyHelp')}>
+                  <textarea
+                    className="textarea mono"
+                    value={form.deployKey}
+                    onChange={(event) => setForm((current) => ({ ...current, deployKey: event.target.value }))}
+                    placeholder={isEditMode ? t('repository.deploymentKeyPlaceholderEdit') : t('repository.deploymentKeyPlaceholderNew')}
+                    rows={6}
+                  />
+                </Field>
+              </div>
+            )}
           </Card>
 
           <Card className="panel-card">
             <SectionTitle
-              kicker={t('repository.configKicker')}
-              title={t('repository.configTitle')}
-              description={t('repository.configDescription')}
+              title={t('repository.basicTitle')}
+              description={t('repository.basicDescription')}
             />
 
-            <Field label={t('repository.sshUrl')}>
-              <input
-                className="input"
-                value={form.repoUrl}
-                onChange={(event) => setForm({ ...form, repoUrl: event.target.value })}
-                placeholder="git@github.com:org/repo.git"
-                required
-              />
-            </Field>
+            <div className="form-grid two">
+              <Field label={t('repository.bindingEnvironment')} help={t('repository.bindingEnvironmentHelp')}>
+                <input
+                  className="input"
+                  value={selectedEnvironment?.name || t('dashboard.header.environmentEmpty')}
+                  readOnly
+                  disabled
+                />
+              </Field>
 
-            <Field label={t('repository.deploymentKey')} help={t('repository.deploymentKeyHelp')}>
-              <textarea
-                className="textarea mono"
-                value={form.deployKey}
-                onChange={(event) => setForm({ ...form, deployKey: event.target.value })}
-                placeholder={isEditMode ? t('repository.deploymentKeyPlaceholderEdit') : t('repository.deploymentKeyPlaceholderNew')}
-                rows={6}
-              />
-            </Field>
+              <Field label={t('repository.branch')}>
+                <input
+                  className="input"
+                  value={form.branch}
+                  onChange={(event) => setForm((current) => ({ ...current, branch: event.target.value }))}
+                  placeholder="main"
+                  required
+                />
+                <small className="field-help" aria-hidden="true">&nbsp;</small>
+              </Field>
+            </div>
 
             <Field label={t('repository.workDir')}>
               <input
                 className="input"
                 value={form.workDir}
-                onChange={(event) => setForm({ ...form, workDir: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, workDir: event.target.value }))}
                 placeholder="/srv/apps/example"
                 required
               />
@@ -1924,8 +2779,8 @@ function RepositoryPage({
                 <input
                   type="radio"
                   name="runnerId"
-                checked={!form.runnerId}
-                  onChange={() => setForm({ ...form, runnerId: null })}
+                  checked={!form.runnerId}
+                  onChange={() => setForm((current) => ({ ...current, runnerId: '' }))}
                 />
                 <div>
                   <strong>{t('repository.localRunnerTitle')}</strong>
@@ -1941,20 +2796,20 @@ function RepositoryPage({
                   <input
                     type="radio"
                     name="runnerId"
-                  checked={String(form.runnerId) === String(runner.id)}
-                  onChange={() => setForm({ ...form, runnerId: String(runner.id) })}
-                />
-                <div>
-                  <strong>{runner.name}</strong>
-                  <p>
+                    checked={String(form.runnerId) === String(runner.id)}
+                    onChange={() => setForm((current) => ({ ...current, runnerId: String(runner.id) }))}
+                  />
+                  <div>
+                    <strong>{runner.name}</strong>
+                    <p>
                       {runnerModeLabel(locale, runner.mode)} ·{' '}
                       {runner.mode === 'ssh'
                         ? `${runner.username}@${runner.host}:${runner.port}`
                         : t('common.localRunner')}
-                  </p>
-                </div>
-              </label>
-            ))}
+                    </p>
+                  </div>
+                </label>
+              ))}
             </div>
 
             {!runners.length && (
@@ -2022,7 +2877,7 @@ function RepositoryPage({
               <textarea
                 className="textarea script mono"
                 value={form.deployScript}
-                onChange={(event) => setForm({ ...form, deployScript: event.target.value })}
+                onChange={(event) => setForm((current) => ({ ...current, deployScript: event.target.value }))}
                 rows={12}
                 required
               />
@@ -2032,7 +2887,7 @@ function RepositoryPage({
               <input
                 type="checkbox"
                 checked={form.cleanWorktree}
-                onChange={(event) => setForm({ ...form, cleanWorktree: event.target.checked })}
+                onChange={(event) => setForm((current) => ({ ...current, cleanWorktree: event.target.checked }))}
               />
               <span>{t('repository.cleanWorktree')}</span>
             </label>
@@ -2058,6 +2913,7 @@ function RepositoryPage({
 
 function RunnerPage({
   runners,
+  selectedEnvironment,
   notice,
   error,
   clearMessages,
@@ -2139,9 +2995,13 @@ function RunnerPage({
   }
 
   const workRoot = form.workRoot || '/opt/deployments';
+  const runnerModeOptions = useMemo(() => ([
+    { value: 'local', label: t('runner.modeLocal'), badge: 'L' },
+    { value: 'ssh', label: t('runner.modeSsh'), badge: 'SSH' }
+  ]), [t]);
 
   return (
-    <div className="page-shell">
+    <div className="page-shell environment-shell" style={environmentShellStyle(selectedEnvironment)}>
       <header className="subpage-header">
         <div className="content-width subpage-header-inner">
           <div className="subpage-header-actions">
@@ -2153,6 +3013,9 @@ function RunnerPage({
           <div className="subpage-title">
             <h1>{isEditMode ? t('runner.titleEdit') : t('runner.titleCreate')}</h1>
             <p>{t('runner.description')}</p>
+            {selectedEnvironment && (
+              <EnvironmentBadge environment={selectedEnvironment} />
+            )}
           </div>
         </div>
       </header>
@@ -2186,14 +3049,11 @@ function RunnerPage({
               </Field>
 
               <Field label={t('runner.mode')}>
-                <select
-                  className="input"
+                <Select
                   value={form.mode}
-                  onChange={(event) => setForm({ ...form, mode: event.target.value })}
-                >
-                  <option value="local">{t('runner.modeLocal')}</option>
-                  <option value="ssh">{t('runner.modeSsh')}</option>
-                </select>
+                  onChange={(nextValue) => setForm({ ...form, mode: nextValue })}
+                  options={runnerModeOptions}
+                />
               </Field>
             </div>
           </Card>
@@ -2403,6 +3263,207 @@ function LocaleSwitch() {
   );
 }
 
+function EnvironmentSwitcher({ environments, selectedEnvironmentId, onChange }) {
+  const { t } = useI18n();
+  const environmentOptions = useMemo(
+    () => environments.map((environment) => ({
+      value: environment.id,
+      label: environment.name,
+      color: environment.color || '#ef3150',
+      meta: environment.slug || ''
+    })),
+    [environments]
+  );
+
+  return (
+    <label className="environment-switcher">
+      <span className="environment-switcher-label">{t('dashboard.header.environment')}</span>
+      <Select
+        variant="rich"
+        className="environment-switcher-select"
+        triggerClassName="environment-switcher-trigger"
+        menuClassName="environment-switcher-menu"
+        value={selectedEnvironmentId}
+        onChange={onChange}
+        placeholder={t('dashboard.header.environmentEmpty')}
+        disabled={!environments.length}
+        options={environmentOptions}
+        renderValue={(option) => (
+          <span className="environment-select-value">
+            <span className="select-color-dot" style={{ '--dot-color': option.color }} />
+            <strong>{option.label}</strong>
+          </span>
+        )}
+        renderOption={(option, state) => (
+          <span className="environment-select-option">
+            <span className="environment-select-copy">
+              <span className="select-color-dot" style={{ '--dot-color': option.color }} />
+              <span>
+                <strong>{option.label}</strong>
+                {option.meta ? <small>{option.meta}</small> : null}
+              </span>
+            </span>
+            {state.selected ? <CheckIcon className="select-check" /> : null}
+          </span>
+        )}
+      />
+    </label>
+  );
+}
+
+function EnvironmentBadge({ environment }) {
+  if (!environment) {
+    return null;
+  }
+
+  return (
+    <span className="environment-badge">
+      <span className="environment-badge-dot" aria-hidden="true" />
+      {environment.name}
+    </span>
+  );
+}
+
+function EnvironmentManagerModal({
+  environments,
+  selectedEnvironmentId,
+  editingEnvironmentId,
+  form,
+  saving,
+  onClose,
+  onSelectEnvironment,
+  onCreateNew,
+  onFormChange,
+  onSave,
+  onDelete
+}) {
+  const { t } = useI18n();
+  const isEditingExisting = Boolean(editingEnvironmentId);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-shell environment-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h2>{t('environments.title')}</h2>
+            <p className="panel-description">{t('environments.description')}</p>
+          </div>
+          <Button
+            type="button"
+            variant="text"
+            className="modal-close"
+            onClick={onClose}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
+            <span className="modal-close-text">{t('common.close')}</span>
+            <CloseIcon className="modal-close-icon" />
+          </Button>
+        </div>
+
+        <div className="environment-manager">
+          <div className="environment-list">
+            <div className="section-head-actions">
+              <Button type="button" variant="outline" size="sm" onClick={onCreateNew}>
+                {t('environments.create')}
+              </Button>
+            </div>
+            {environments.length ? environments.map((environment) => (
+              <button
+                key={environment.id}
+                type="button"
+                className={`environment-list-item ${editingEnvironmentId === environment.id ? 'active' : ''}`.trim()}
+                onClick={() => onSelectEnvironment(environment)}
+              >
+                <span className="environment-list-main">
+                  <span className="select-color-dot" style={{ '--dot-color': environment.color || '#D83B53' }} />
+                  <span>
+                    <strong>{environment.name}</strong>
+                    <small>{environment.slug}</small>
+                  </span>
+                </span>
+                {selectedEnvironmentId === environment.id ? <Badge tone="secondary">{t('common.current')}</Badge> : null}
+              </button>
+            )) : (
+              <EmptyState compact title={t('environments.empty')} body={t('dashboard.header.environmentEmpty')} />
+            )}
+          </div>
+
+          <Card className="panel-card environment-editor">
+            <form className="form-stack" onSubmit={onSave}>
+              <div className="form-grid two environment-form-grid">
+                <Field label={t('environments.name')} help=" ">
+                  <input
+                    className="input"
+                    value={form.name}
+                    onChange={(event) => onFormChange((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Production"
+                    required
+                  />
+                </Field>
+
+                <Field label={t('environments.slug')} help={t('environments.slugHelp')}>
+                  <input
+                    className="input mono"
+                    value={form.slug}
+                    onChange={(event) => onFormChange((current) => ({ ...current, slug: slugifyEnvironmentName(event.target.value) }))}
+                    placeholder="production"
+                    required
+                  />
+                </Field>
+              </div>
+
+              <Field label={t('environments.descriptionLabel')}>
+                <input
+                  className="input"
+                  value={form.description}
+                  onChange={(event) => onFormChange((current) => ({ ...current, description: event.target.value }))}
+                  placeholder=""
+                />
+              </Field>
+
+              <Field label={t('environments.color')}>
+                <div className="color-swatch-row">
+                  {ENVIRONMENT_COLOR_OPTIONS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={`color-swatch ${form.color === color ? 'active' : ''}`.trim()}
+                      style={{ '--swatch-color': color }}
+                      onClick={() => onFormChange((current) => ({ ...current, color }))}
+                      aria-label={color}
+                    />
+                  ))}
+                </div>
+              </Field>
+
+              <div className="environment-hint">
+                {form.slug === 'production' ? t('environments.productionHint') : null}
+                {form.slug === 'testing' ? t('environments.testingHint') : null}
+              </div>
+
+              <div className="form-actions">
+                <Button type="submit" disabled={saving}>
+                  {saving ? t('common.saving') : (isEditingExisting ? t('environments.saveUpdate') : t('environments.saveCreate'))}
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={onDelete}
+                  disabled={!isEditingExisting}
+                  title={isEditingExisting ? '' : t('environments.cannotDelete')}
+                >
+                  {t('environments.delete')}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DateFilterPicker({ value, onChange }) {
   const { locale, t } = useI18n();
   const containerRef = useRef(null);
@@ -2561,6 +3622,279 @@ function DateFilterPicker({ value, onChange }) {
   );
 }
 
+function Select({
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled = false,
+  variant = 'compact',
+  searchable = false,
+  clearable = false,
+  className = '',
+  menuClassName = '',
+  triggerClassName = '',
+  renderOption,
+  renderValue,
+  getOptionSearchText
+}) {
+  const { t } = useI18n();
+  const rootRef = useRef(null);
+  const searchRef = useRef(null);
+  const optionRefs = useRef([]);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selectedOption = useMemo(
+    () => options.find((option) => String(option.value) === String(value)) || null,
+    [options, value]
+  );
+  const filteredOptions = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) {
+      return options;
+    }
+
+    return options.filter((option) => {
+      const haystack = (getOptionSearchText?.(option) || [
+        option.label,
+        option.description,
+        option.meta,
+        option.badge
+      ].filter(Boolean).join(' ')).toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }, [getOptionSearchText, options, query]);
+  const [highlightedIndex, setHighlightedIndex] = useState(() => {
+    if (!selectedOption) {
+      return 0;
+    }
+    return Math.max(0, filteredOptions.findIndex((option) => String(option.value) === String(selectedOption.value)));
+  });
+
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (rootRef.current && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (searchable) {
+      searchRef.current?.focus();
+      return;
+    }
+    optionRefs.current[highlightedIndex]?.focus();
+  }, [highlightedIndex, open, searchable]);
+
+  useEffect(() => {
+    const selectedIndex = selectedOption
+      ? filteredOptions.findIndex((option) => String(option.value) === String(selectedOption.value))
+      : -1;
+    setHighlightedIndex(Math.max(0, selectedIndex));
+  }, [filteredOptions, selectedOption]);
+
+  function closeMenu() {
+    setOpen(false);
+    setQuery('');
+  }
+
+  function selectValue(nextValue) {
+    onChange?.(nextValue);
+    closeMenu();
+  }
+
+  function moveHighlight(direction) {
+    if (!filteredOptions.length) {
+      return;
+    }
+    setHighlightedIndex((current) => {
+      const nextIndex = current + direction;
+      if (nextIndex < 0) {
+        return filteredOptions.length - 1;
+      }
+      if (nextIndex >= filteredOptions.length) {
+        return 0;
+      }
+      return nextIndex;
+    });
+  }
+
+  function handleTriggerKeyDown(event) {
+    if (disabled) {
+      return;
+    }
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!open) {
+        setOpen(true);
+        return;
+      }
+      moveHighlight(event.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setOpen((current) => !current);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu();
+    }
+  }
+
+  function handleMenuKeyDown(event) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveHighlight(1);
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveHighlight(-1);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const option = filteredOptions[highlightedIndex];
+      if (option) {
+        selectValue(option.value);
+      }
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu();
+    }
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className={`select select-${variant} ${open ? 'open' : ''} ${disabled ? 'disabled' : ''} ${className}`.trim()}
+    >
+      <button
+        type="button"
+        className={`select-trigger ${triggerClassName}`.trim()}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={handleTriggerKeyDown}
+      >
+        <span className="select-trigger-value">
+          {selectedOption
+            ? (renderValue ? renderValue(selectedOption) : <DefaultSelectValue option={selectedOption} />)
+            : <span className="select-placeholder">{placeholder || t('select.placeholder')}</span>}
+        </span>
+        <span className="select-trigger-icon" aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
+      </button>
+
+      {open && (
+        <div className={`select-menu ${menuClassName}`.trim()} onKeyDown={handleMenuKeyDown}>
+          {searchable && (
+            <div className="select-search-shell">
+              <SearchIcon className="select-search-icon" />
+              <input
+                ref={searchRef}
+                className="select-search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('common.search')}
+              />
+            </div>
+          )}
+
+          <div className="select-options" role="listbox">
+            {filteredOptions.length ? (
+              filteredOptions.map((option, index) => {
+                const selected = String(option.value) === String(value);
+                const highlighted = index === highlightedIndex;
+                return (
+                  <button
+                    key={option.value}
+                    ref={(node) => {
+                      optionRefs.current[index] = node;
+                    }}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    className={`select-option ${selected ? 'selected' : ''} ${highlighted ? 'highlighted' : ''}`.trim()}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    onClick={() => selectValue(option.value)}
+                  >
+                    {renderOption
+                      ? renderOption(option, { selected, highlighted })
+                      : <DefaultSelectOption option={option} selected={selected} />}
+                  </button>
+                );
+              })
+            ) : (
+              <div className="select-empty">{t('select.noResults')}</div>
+            )}
+          </div>
+
+          {clearable && value ? (
+            <div className="select-menu-footer">
+              <button
+                type="button"
+                className="select-clear"
+                onClick={() => selectValue('')}
+              >
+                {t('common.clear')}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DefaultSelectValue({ option }) {
+  return (
+    <span className="select-value-default">
+      {option.color ? <span className="select-color-dot" style={{ '--dot-color': option.color }} /> : null}
+      {option.badge ? <span className="select-inline-badge">{option.badge}</span> : null}
+      <span>{option.label}</span>
+    </span>
+  );
+}
+
+function DefaultSelectOption({ option, selected }) {
+  return (
+    <span className="select-option-default">
+      <span className="select-option-main">
+        {option.color ? <span className="select-color-dot" style={{ '--dot-color': option.color }} /> : null}
+        {option.badge ? <span className="select-inline-badge">{option.badge}</span> : null}
+        <span>{option.label}</span>
+      </span>
+      {selected ? <CheckIcon className="select-check" /> : null}
+    </span>
+  );
+}
+
 function Button({
   variant = 'primary',
   size = 'md',
@@ -2677,21 +4011,23 @@ function RepoCard({ repo, onCopy, onEdit, onTrigger, onDelete }) {
       <div className="repo-top">
         <div>
           <strong>{repo.name}</strong>
-          <p>{providerLabel(locale, repo.provider)} · {repo.branch} · {repo.runnerName || t('common.localRunner')}</p>
+          <p>{providerLabel(locale, repo.provider)} · {repo.branch} · {repo.runner || repo.runnerName || t('common.localRunner')}</p>
         </div>
         <Status status={repo.lastJobStatus} />
       </div>
 
       <div className="repo-grid">
         <MetaBlock
+          label={t('labels.repositorySource')}
+          value={repo.name}
+        />
+        <MetaBlock
           label={t('labels.repositoryUrl')}
           value={repo.repoUrl}
         />
         <MetaBlock
           label={t('labels.deploymentKey')}
-          value={repo.deployKey ? maskSecret(repo.deployKey) : t('common.notSet')}
-          copyValue={repo.deployKey}
-          onCopy={onCopy}
+          value={repo.hasDeployKey ? t('repository.deploymentKeyConfigured') : t('repository.deploymentKeyMissing')}
         />
         <MetaBlock
           label={t('labels.webhookUrl')}
@@ -2778,6 +4114,29 @@ function RunnerCard({ runner, onEdit, onTest, onDelete }) {
             {t('common.test')}
           </Button>
         )}
+        <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
+          {t('common.edit')}
+        </Button>
+        <Button type="button" variant="danger" size="sm" onClick={onDelete}>
+          {t('common.delete')}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function SecretCard({ secret, onEdit, onDelete }) {
+  const { t } = useI18n();
+  return (
+    <Card className="secret-card">
+      <div className="secret-main">
+        <div>
+          <strong className="mono">{secret.name}</strong>
+          <p>{secret.repository || t('dashboard.secrets.globalDescription')}</p>
+        </div>
+        <code>{secret.maskedValue || '••••'}</code>
+      </div>
+      <div className="repo-actions">
         <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
           {t('common.edit')}
         </Button>

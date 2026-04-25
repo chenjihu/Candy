@@ -11,7 +11,7 @@ import (
 func TestVerifyGitHubSignature(t *testing.T) {
 	secret := "top-secret"
 	body := []byte(`{"ref":"refs/heads/main"}`)
-	req := httptest.NewRequest("POST", "/webhooks/1", nil)
+	req := httptest.NewRequest("POST", "/webhooks/wh_test", nil)
 	req.Header.Set("X-Hub-Signature-256", "sha256="+hmacSHA256Hex(secret, body))
 
 	if err := verifyGitHubSignature(secret, req, body); err != nil {
@@ -28,7 +28,7 @@ func TestVerifyGiteeSignature(t *testing.T) {
 	secret := "top-secret"
 	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	token := url.QueryEscape(hmacSHA256Base64(secret, timestamp+"\n"+secret))
-	req := httptest.NewRequest("POST", "/webhooks/1", nil)
+	req := httptest.NewRequest("POST", "/webhooks/wh_test", nil)
 	req.Header.Set("X-Gitee-Timestamp", timestamp)
 	req.Header.Set("X-Gitee-Token", token)
 

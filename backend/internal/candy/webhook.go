@@ -42,14 +42,18 @@ type pushCommit struct {
 }
 
 func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	id, err := pathID(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	webhookID := strings.TrimSpace(r.PathValue("id"))
+	if webhookID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("invalid id"))
 		return
 	}
-	repo, err := a.store.GetRepository(r.Context(), id, false)
+	repo, err := a.store.getEnvironmentRepositoryRecordByWebhookID(r.Context(), webhookID, true)
 	if err != nil {
-		writeError(w, http.StatusNotFound, errors.New("repository not found"))
+		writeError(w, http.StatusNotFound, errors.New("environment repository not found"))
+		return
+	}
+	if !repo.LegacyRepositoryID.Valid {
+		writeError(w, http.StatusInternalServerError, errors.New("environment repository is missing deployment binding"))
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
@@ -90,9 +94,9 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deliveryID := webhookDeliveryID(provider, repo.ID, r, body)
+	deliveryID := webhookDeliveryID(provider, repo.LegacyRepositoryID.Int64, r, body)
 	job, err := a.store.CreateJob(r.Context(), DeployJob{
-		RepositoryID:  repo.ID,
+		RepositoryID:  repo.LegacyRepositoryID.Int64,
 		RunnerID:      repo.RunnerID,
 		Provider:      provider,
 		Event:         event,

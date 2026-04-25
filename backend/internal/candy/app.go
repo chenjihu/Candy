@@ -59,6 +59,16 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", a.requireAuth(a.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", a.requireAuth(a.handleMe))
 
+	mux.HandleFunc("GET /api/environments", a.requireAuth(a.handleListEnvironments))
+	mux.HandleFunc("POST /api/environments", a.requireAuth(a.handleCreateEnvironment))
+	mux.HandleFunc("PUT /api/environments/{id}", a.requireAuth(a.handleUpdateEnvironment))
+	mux.HandleFunc("DELETE /api/environments/{id}", a.requireAuth(a.handleDeleteEnvironment))
+
+	mux.HandleFunc("GET /api/repository-sources", a.requireAuth(a.handleListRepositorySources))
+	mux.HandleFunc("POST /api/repository-sources", a.requireAuth(a.handleCreateRepositorySource))
+	mux.HandleFunc("PUT /api/repository-sources/{id}", a.requireAuth(a.handleUpdateRepositorySource))
+	mux.HandleFunc("DELETE /api/repository-sources/{id}", a.requireAuth(a.handleDeleteRepositorySource))
+
 	mux.HandleFunc("GET /api/runners", a.requireAuth(a.handleListRunners))
 	mux.HandleFunc("POST /api/runners", a.requireAuth(a.handleCreateRunner))
 	mux.HandleFunc("PUT /api/runners/{id}", a.requireAuth(a.handleUpdateRunner))
@@ -71,6 +81,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/repositories/{id}", a.requireAuth(a.handleUpdateRepository))
 	mux.HandleFunc("DELETE /api/repositories/{id}", a.requireAuth(a.handleDeleteRepository))
 	mux.HandleFunc("POST /api/repositories/{id}/trigger", a.requireAuth(a.handleManualTrigger))
+
+	mux.HandleFunc("GET /api/secrets", a.requireAuth(a.handleListSecrets))
+	mux.HandleFunc("POST /api/secrets", a.requireAuth(a.handleCreateSecret))
+	mux.HandleFunc("PUT /api/secrets/{id}", a.requireAuth(a.handleUpdateSecret))
+	mux.HandleFunc("DELETE /api/secrets/{id}", a.requireAuth(a.handleDeleteSecret))
 
 	mux.HandleFunc("GET /api/jobs", a.requireAuth(a.handleListJobs))
 	mux.HandleFunc("GET /api/jobs/{id}", a.requireAuth(a.handleGetJob))
@@ -108,6 +123,22 @@ func pathID(r *http.Request) (int64, error) {
 		return 0, errors.New("invalid id")
 	}
 	return id, nil
+}
+
+func pathPublicID(r *http.Request) (string, error) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		return "", errors.New("invalid id")
+	}
+	return id, nil
+}
+
+func requiredEnvironmentID(r *http.Request) (string, error) {
+	environmentID := strings.TrimSpace(r.URL.Query().Get("environmentId"))
+	if environmentID == "" {
+		return "", errors.New("environmentId is required")
+	}
+	return environmentID, nil
 }
 
 func (a *App) serveFrontend(w http.ResponseWriter, r *http.Request) {
