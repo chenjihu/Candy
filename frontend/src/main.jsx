@@ -2649,6 +2649,19 @@ function RepositoryPage({
           })
         });
         repositorySourceId = createdSource?.id || '';
+      } else if (form.sourceMode === 'existing' && form.deployKey.trim() && repositorySourceId) {
+        const existingSource = repositorySources.find((s) => s.id === repositorySourceId);
+        if (existingSource) {
+          await api(`/api/repository-sources/${repositorySourceId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              name: existingSource.name,
+              provider: existingSource.provider,
+              repoUrl: existingSource.repoUrl,
+              deployKey: form.deployKey
+            })
+          });
+        }
       }
 
       const payload = {
@@ -2796,6 +2809,15 @@ function RepositoryPage({
                       <DetailCard label={t('repository.platform')} value={providerLabel(locale, selectedSource.provider)} />
                       <DetailCard label={t('repository.sshUrl')} value={selectedSource.repoUrl} />
                     </div>
+                    <Field label={t('repository.deploymentKey')} help={t('repository.deploymentKeyHelp')}>
+                      <textarea
+                        className="textarea mono"
+                        value={form.deployKey}
+                        onChange={(event) => setForm((current) => ({ ...current, deployKey: event.target.value }))}
+                        placeholder={selectedSource.hasDeployKey ? t('repository.deploymentKeyPlaceholderEdit') : t('repository.deploymentKeyPlaceholderNew')}
+                        rows={6}
+                      />
+                    </Field>
                   </div>
                 ) : (
                   <EmptyState
@@ -2956,7 +2978,7 @@ function RepositoryPage({
                   <input
                     className="input mono"
                     value={form.webhookSecret}
-                    readOnly
+                    onChange={(event) => setForm((current) => ({ ...current, webhookSecret: event.target.value }))}
                   />
                   <Button type="button" variant="secondary" onClick={regenerateSecret}>
                     {t('repository.regenerate')}

@@ -1707,6 +1707,7 @@ code {
   display: grid;
   gap: 8px;
   margin: 0;
+  align-content: start;
 }
 
 .field-label {

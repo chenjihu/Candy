@@ -314,7 +314,16 @@ func remoteWorkDir(runner Runner, repo Repository) string {
 
 func writeTempKey(key string) (string, func(), error) {
 	cleanup := func() {}
+	// Normalize line endings: some clients (especially on Windows) or clipboard
+	// sources inject CRLF which makes libcrypto/OpenSSL reject the PEM with
+	// "error in libcrypto". Strip CR so every line ends with LF only.
+	key = strings.TrimPrefix(key, "\ufeff") // drop UTF-8 BOM if present
+	key = strings.ReplaceAll(key, "\r\n", "\n")
+	key = strings.ReplaceAll(key, "\r", "\n")
 	key = strings.TrimSpace(key)
+	if !strings.HasPrefix(key, "-----BEGIN") {
+		return "", cleanup, fmt.Errorf("deploy key is not a valid PEM/OpenSSH private key (missing BEGIN header); ensure you pasted the full private key contents")
+	}
 	if key == "" {
 		return "", cleanup, nil
 	}
