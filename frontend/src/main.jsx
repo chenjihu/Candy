@@ -128,6 +128,20 @@ const I18N = {
       webhookCopied: 'Webhook URL copied',
       noRunnerToTest: 'Save the Runner first, then run the connection test.'
     },
+    confirms: {
+      deleteRepositoryTitle: 'Delete repository binding',
+      deleteRepositoryBody: 'This will remove the current environment binding for {name}. Repo-scoped Secrets and deployment history will also be removed.',
+      deleteRepositoryConfirm: 'Delete repository',
+      deleteRunnerTitle: 'Delete Runner',
+      deleteRunnerBody: 'This will permanently remove {name}. Repository bindings that used this Runner will fall back to no assigned Runner.',
+      deleteRunnerConfirm: 'Delete Runner',
+      deleteSecretTitle: 'Delete Secret',
+      deleteSecretBody: 'This will permanently remove the Secret {name}. Future deployments will no longer receive this environment variable.',
+      deleteSecretConfirm: 'Delete Secret',
+      deleteEnvironmentTitle: 'Delete environment',
+      deleteEnvironmentBody: 'This will permanently remove {name}, including its repository bindings, scoped Secrets, deployment history, and any repository sources left without bindings.',
+      deleteEnvironmentConfirm: 'Delete environment'
+    },
     auth: {
       title: 'Sign in to the console',
       username: 'Username',
@@ -473,6 +487,20 @@ const I18N = {
       secretCopied: 'Webhook 密钥已复制',
       webhookCopied: 'Webhook 地址已复制',
       noRunnerToTest: '请先保存 Runner，再进行连接测试。'
+    },
+    confirms: {
+      deleteRepositoryTitle: '删除仓库绑定',
+      deleteRepositoryBody: '这会移除 {name} 在当前环境下的仓库绑定。该仓库下的作用域 Secrets 和部署历史也会一并删除。',
+      deleteRepositoryConfirm: '删除仓库',
+      deleteRunnerTitle: '删除 Runner',
+      deleteRunnerBody: '这会永久删除 {name}。原先使用这个 Runner 的仓库绑定会变成未分配 Runner。',
+      deleteRunnerConfirm: '删除 Runner',
+      deleteSecretTitle: '删除 Secret',
+      deleteSecretBody: '这会永久删除 Secret {name}。后续部署将不再注入这个环境变量。',
+      deleteSecretConfirm: '删除 Secret',
+      deleteEnvironmentTitle: '删除环境',
+      deleteEnvironmentBody: '这会永久删除 {name}，包括其中的仓库绑定、作用域 Secrets、部署历史，以及因此失去绑定的 repository source。',
+      deleteEnvironmentConfirm: '删除环境'
     },
     auth: {
       title: '登录控制台',
@@ -1759,6 +1787,8 @@ function DashboardPage({
   const [jobDate, setJobDate] = useState('');
   const [secretForm, setSecretForm] = useState(emptySecret);
   const [editingSecretId, setEditingSecretId] = useState(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  const [confirmingAction, setConfirmingAction] = useState(false);
   const [environmentModalOpen, setEnvironmentModalOpen] = useState(false);
   const [editingEnvironmentId, setEditingEnvironmentId] = useState(selectedEnvironmentId);
   const [environmentForm, setEnvironmentForm] = useState({
@@ -1830,42 +1860,70 @@ function DashboardPage({
     }
   }
 
-  async function deleteRepository(id) {
+  function requestConfirmation(config) {
+    setPendingConfirmation(config);
+  }
+
+  function requestDeleteRepository(repo) {
+    requestConfirmation({
+      title: t('confirms.deleteRepositoryTitle'),
+      body: t('confirms.deleteRepositoryBody', { name: repo.name || 'Repository' }),
+      confirmLabel: t('confirms.deleteRepositoryConfirm'),
+      action: async () => {
+        await api(`/api/repositories/${repo.id}`, { method: 'DELETE' });
+        setNotice(t('notifications.repoDeleted'));
+        await refreshData();
+      }
+    });
+  }
+
+  async function confirmPendingAction() {
+    if (!pendingConfirmation?.action) {
+      return;
+    }
+    setConfirmingAction(true);
     try {
-      await api(`/api/repositories/${id}`, { method: 'DELETE' });
-      setNotice(t('notifications.repoDeleted'));
-      await refreshData();
+      await pendingConfirmation.action();
+      setPendingConfirmation(null);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setConfirmingAction(false);
     }
   }
 
-  async function deleteRunner(id) {
-    try {
-      await api(`/api/runners/${id}`, { method: 'DELETE' });
-      setNotice(t('notifications.runnerDeleted'));
-      await refreshData();
-    } catch (err) {
-      setError(err.message);
-    }
+  function requestDeleteRunner(runner) {
+    requestConfirmation({
+      title: t('confirms.deleteRunnerTitle'),
+      body: t('confirms.deleteRunnerBody', { name: runner.name || 'Runner' }),
+      confirmLabel: t('confirms.deleteRunnerConfirm'),
+      action: async () => {
+        await api(`/api/runners/${runner.id}`, { method: 'DELETE' });
+        setNotice(t('notifications.runnerDeleted'));
+        await refreshData();
+      }
+    });
   }
 
   async function saveSecret(event) {
     event.preventDefault();
     try {
+      const query = selectedEnvironmentId
+        ? `?environmentId=${encodeURIComponent(selectedEnvironmentId)}`
+        : '';
       const payload = {
         name: secretForm.name.trim().toUpperCase(),
         value: secretForm.value,
-        repositoryId: secretForm.repositoryId ? Number(secretForm.repositoryId) : null
+        repositoryId: secretForm.repositoryId || null
       };
       if (editingSecretId) {
-        await api(`/api/secrets/${editingSecretId}`, {
+        await api(`/api/secrets/${editingSecretId}${query}`, {
           method: 'PUT',
           body: JSON.stringify(payload)
         });
         setNotice(t('notifications.secretSaved'));
       } else {
-        await api('/api/secrets', {
+        await api(`/api/secrets${query}`, {
           method: 'POST',
           body: JSON.stringify(payload)
         });
@@ -1879,18 +1937,24 @@ function DashboardPage({
     }
   }
 
-  async function deleteSecret(id) {
-    try {
-      await api(`/api/secrets/${id}`, { method: 'DELETE' });
-      setNotice(t('notifications.secretDeleted'));
-      if (editingSecretId === id) {
-        setSecretForm(emptySecret);
-        setEditingSecretId(null);
+  function requestDeleteSecret(secret) {
+    requestConfirmation({
+      title: t('confirms.deleteSecretTitle'),
+      body: t('confirms.deleteSecretBody', { name: secret.name || 'Secret' }),
+      confirmLabel: t('confirms.deleteSecretConfirm'),
+      action: async () => {
+        const query = selectedEnvironmentId
+          ? `?environmentId=${encodeURIComponent(selectedEnvironmentId)}`
+          : '';
+        await api(`/api/secrets/${secret.id}${query}`, { method: 'DELETE' });
+        setNotice(t('notifications.secretDeleted'));
+        if (editingSecretId === secret.id) {
+          setSecretForm(emptySecret);
+          setEditingSecretId(null);
+        }
+        await refreshData();
       }
-      await refreshData();
-    } catch (err) {
-      setError(err.message);
-    }
+    });
   }
 
   function editSecret(secret) {
@@ -1975,18 +2039,24 @@ function DashboardPage({
     }
   }
 
-  async function deleteEnvironment() {
+  function requestDeleteEnvironment() {
     if (!editingEnvironmentId) {
       return;
     }
-    try {
-      await api(`/api/environments/${editingEnvironmentId}`, { method: 'DELETE' });
-      setNotice(t('notifications.environmentDeleted'));
-      setEnvironmentModalOpen(false);
-      await refreshData();
-    } catch (err) {
-      setError(err.message);
-    }
+    const environment = environments.find((item) => item.id === editingEnvironmentId);
+    requestConfirmation({
+      title: t('confirms.deleteEnvironmentTitle'),
+      body: t('confirms.deleteEnvironmentBody', {
+        name: environment?.name || environment?.slug || 'Environment'
+      }),
+      confirmLabel: t('confirms.deleteEnvironmentConfirm'),
+      action: async () => {
+        await api(`/api/environments/${editingEnvironmentId}`, { method: 'DELETE' });
+        setNotice(t('notifications.environmentDeleted'));
+        setEnvironmentModalOpen(false);
+        await refreshData();
+      }
+    });
   }
 
   async function triggerRepository(repo) {
@@ -2151,7 +2221,7 @@ function DashboardPage({
                     onCopy={copyValue}
                     onEdit={() => navigate(`/add-repository?edit=true&id=${repo.id}`)}
                     onTrigger={() => triggerRepository(repo)}
-                    onDelete={() => deleteRepository(repo.id)}
+                    onDelete={() => requestDeleteRepository(repo)}
                   />
                 ))}
               </div>
@@ -2190,7 +2260,7 @@ function DashboardPage({
                     runner={runner}
                     onEdit={() => navigate(`/add-runner?edit=true&id=${runner.id}`)}
                     onTest={() => testRunner(runner)}
-                    onDelete={() => deleteRunner(runner.id)}
+                    onDelete={() => requestDeleteRunner(runner)}
                   />
                 ))}
               </div>
@@ -2270,7 +2340,7 @@ function DashboardPage({
                     key={secret.id}
                     secret={secret}
                     onEdit={() => editSecret(secret)}
-                    onDelete={() => deleteSecret(secret.id)}
+                    onDelete={() => requestDeleteSecret(secret)}
                   />
                 ))}
               </div>
@@ -2396,7 +2466,19 @@ function DashboardPage({
           onCreateNew={startCreateEnvironment}
           onFormChange={setEnvironmentForm}
           onSave={saveEnvironment}
-          onDelete={deleteEnvironment}
+          onDelete={requestDeleteEnvironment}
+        />
+      )}
+
+      {pendingConfirmation && (
+        <ConfirmationModal
+          tone="danger"
+          title={pendingConfirmation.title}
+          body={pendingConfirmation.body}
+          confirmLabel={pendingConfirmation.confirmLabel}
+          confirming={confirmingAction}
+          onClose={() => !confirmingAction && setPendingConfirmation(null)}
+          onConfirm={confirmPendingAction}
         />
       )}
     </div>
@@ -3458,6 +3540,57 @@ function EnvironmentManagerModal({
               </div>
             </form>
           </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmationModal({
+  tone = 'danger',
+  title,
+  body,
+  confirmLabel,
+  confirming = false,
+  onClose,
+  onConfirm
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className={`modal-shell confirmation-modal confirmation-modal-${tone}`.trim()}
+        role="dialog"
+        aria-modal="true"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p className="panel-description">{body}</p>
+          </div>
+          <Button
+            type="button"
+            variant="text"
+            className="modal-close"
+            onClick={onClose}
+            disabled={confirming}
+            aria-label={t('common.close')}
+            title={t('common.close')}
+          >
+            <span className="modal-close-text">{t('common.close')}</span>
+            <CloseIcon className="modal-close-icon" />
+          </Button>
+        </div>
+
+        <div className="confirmation-modal-actions">
+          <Button type="button" variant="outline" onClick={onClose} disabled={confirming}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="button" variant="danger" onClick={onConfirm} disabled={confirming}>
+            {confirming ? t('common.loading') : confirmLabel}
+          </Button>
         </div>
       </div>
     </div>

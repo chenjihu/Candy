@@ -52,10 +52,6 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("environment repository not found"))
 		return
 	}
-	if !repo.LegacyRepositoryID.Valid {
-		writeError(w, http.StatusInternalServerError, errors.New("environment repository is missing deployment binding"))
-		return
-	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -94,19 +90,22 @@ func (a *App) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deliveryID := webhookDeliveryID(provider, repo.LegacyRepositoryID.Int64, r, body)
+	deliveryID := webhookDeliveryID(provider, repo.InternalID, r, body)
 	job, err := a.store.CreateJob(r.Context(), DeployJob{
-		RepositoryID:  repo.LegacyRepositoryID.Int64,
-		RunnerID:      repo.RunnerID,
-		Provider:      provider,
-		Event:         event,
-		DeliveryID:    deliveryID,
-		Branch:        branch,
-		CommitSHA:     commitSHA(payload),
-		CommitMessage: commitMessage(payload),
-		CommitAuthor:  commitAuthor(payload),
-		Status:        "queued",
-		TriggeredAt:   time.Now(),
+		EnvironmentRepositoryID: repo.InternalID,
+		RepositoryID:            repo.ID,
+		RepositoryName:          repo.Name,
+		RunnerID:                repo.RunnerInternalID,
+		RunnerName:              repo.Runner,
+		Provider:                provider,
+		Event:                   event,
+		DeliveryID:              deliveryID,
+		Branch:                  branch,
+		CommitSHA:               commitSHA(payload),
+		CommitMessage:           commitMessage(payload),
+		CommitAuthor:            commitAuthor(payload),
+		Status:                  "queued",
+		TriggeredAt:             time.Now(),
 	})
 	if errors.Is(err, ErrDuplicateDelivery) {
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "duplicate", "job": job})
@@ -178,26 +177,22 @@ func verifyGitHubSignature(secret string, r *http.Request, body []byte) error {
 }
 
 func verifyGiteeSignature(secret string, r *http.Request) error {
-	token := r.Header.Get("X-Gitee-Token")
+	token := strings.TrimSpace(r.Header.Get("X-Gitee-Token"))
 	if token == "" {
 		return errors.New("missing X-Gitee-Token")
 	}
-	timestamp := r.Header.Get("X-Gitee-Timestamp")
+	timestamp := strings.TrimSpace(r.Header.Get("X-Gitee-Timestamp"))
 	if timestamp == "" {
-		if subtle.ConstantTimeCompare([]byte(token), []byte(secret)) == 1 {
-			return nil
-		}
 		return errors.New("missing X-Gitee-Timestamp")
 	}
 	if err := verifyTimestamp(timestamp); err != nil {
 		return err
 	}
 	expected := hmacSHA256Base64(secret, timestamp+"\n"+secret)
-	actual := token
-	if decoded, err := url.QueryUnescape(token); err == nil {
-		actual = decoded
+	if subtle.ConstantTimeCompare([]byte(url.QueryEscape(expected)), []byte(token)) == 1 {
+		return nil
 	}
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(token)) != 1 {
 		return errors.New("invalid Gitee signature")
 	}
 	return nil

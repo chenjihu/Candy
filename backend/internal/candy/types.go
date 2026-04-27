@@ -46,8 +46,8 @@ type Repository struct {
 }
 
 type Environment struct {
-	ID          int64     `json:"-"`
-	PublicID    string    `json:"id"`
+	InternalID  int64     `json:"-"`
+	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Slug        string    `json:"slug"`
 	Description string    `json:"description"`
@@ -57,8 +57,8 @@ type Environment struct {
 }
 
 type RepositorySource struct {
-	ID           int64     `json:"-"`
-	PublicID     string    `json:"id"`
+	InternalID   int64     `json:"-"`
+	ID           string    `json:"id"`
 	Name         string    `json:"name"`
 	Provider     string    `json:"provider"`
 	RepoURL      string    `json:"repoUrl"`
@@ -69,63 +69,66 @@ type RepositorySource struct {
 }
 
 type EnvironmentRepository struct {
-	ID                 int64     `json:"-"`
-	PublicID           string    `json:"id"`
-	EnvironmentID      int64     `json:"-"`
-	EnvironmentKey     string    `json:"environmentId"`
-	EnvironmentName    string    `json:"environment"`
-	RepositorySourceID int64     `json:"-"`
-	SourceKey          string    `json:"repositorySourceId"`
-	Name               string    `json:"name"`
-	Provider           string    `json:"provider"`
-	RepoURL            string    `json:"repoUrl"`
-	WebhookSecret      string    `json:"webhookSecret,omitempty"`
-	WebhookURL         string    `json:"webhookUrl,omitempty"`
-	WebhookID          string    `json:"-"`
-	Branch             string    `json:"branch"`
-	WorkDir            string    `json:"workDir"`
-	DeployScript       string    `json:"deployScript"`
-	RunnerID           *int64    `json:"-"`
-	RunnerKey          string    `json:"runnerId,omitempty"`
-	Runner             string    `json:"runner,omitempty"`
-	CleanWorktree      bool      `json:"cleanWorktree"`
-	DeployKey          string    `json:"deployKey,omitempty"`
-	HasDeployKey       bool      `json:"hasDeployKey"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	InternalID                 int64     `json:"-"`
+	ID                         string    `json:"id"`
+	EnvironmentInternalID      int64     `json:"-"`
+	EnvironmentID              string    `json:"environmentId"`
+	EnvironmentName            string    `json:"environment"`
+	RepositorySourceInternalID int64     `json:"-"`
+	RepositorySourceID         string    `json:"repositorySourceId"`
+	Name                       string    `json:"name"`
+	Provider                   string    `json:"provider"`
+	RepoURL                    string    `json:"repoUrl"`
+	WebhookSecret              string    `json:"webhookSecret,omitempty"`
+	WebhookURL                 string    `json:"webhookUrl,omitempty"`
+	WebhookID                  string    `json:"-"`
+	Branch                     string    `json:"branch"`
+	WorkDir                    string    `json:"workDir"`
+	DeployScript               string    `json:"deployScript"`
+	RunnerInternalID           *int64    `json:"-"`
+	RunnerID                   string    `json:"runnerId,omitempty"`
+	Runner                     string    `json:"runner,omitempty"`
+	CleanWorktree              bool      `json:"cleanWorktree"`
+	DeployKey                  string    `json:"deployKey,omitempty"`
+	HasDeployKey               bool      `json:"hasDeployKey"`
+	CreatedAt                  time.Time `json:"createdAt"`
+	UpdatedAt                  time.Time `json:"updatedAt"`
 }
 
 type Secret struct {
-	ID           int64     `json:"id"`
-	Name         string    `json:"name"`
-	Value        string    `json:"value,omitempty"`
-	MaskedValue  string    `json:"maskedValue,omitempty"`
-	RepositoryID *int64    `json:"repositoryId,omitempty"`
-	Repository   string    `json:"repository,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID                      int64     `json:"id"`
+	Name                    string    `json:"name"`
+	Value                   string    `json:"value,omitempty"`
+	MaskedValue             string    `json:"maskedValue,omitempty"`
+	EnvironmentID           int64     `json:"-"`
+	EnvironmentRepositoryID *int64    `json:"-"`
+	RepositoryID            string    `json:"repositoryId,omitempty"`
+	Repository              string    `json:"repository,omitempty"`
+	CreatedAt               time.Time `json:"createdAt"`
+	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
 type DeployJob struct {
-	ID             int64      `json:"id"`
-	RepositoryID   int64      `json:"repositoryId"`
-	RepositoryName string     `json:"repositoryName,omitempty"`
-	RunnerID       *int64     `json:"runnerId,omitempty"`
-	RunnerName     string     `json:"runnerName,omitempty"`
-	Provider       string     `json:"provider"`
-	Event          string     `json:"event"`
-	DeliveryID     string     `json:"deliveryId"`
-	Branch         string     `json:"branch"`
-	CommitSHA      string     `json:"commitSha"`
-	CommitMessage  string     `json:"commitMessage"`
-	CommitAuthor   string     `json:"commitAuthor"`
-	Status         string     `json:"status"`
-	ExitCode       *int       `json:"exitCode,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	TriggeredAt    time.Time  `json:"triggeredAt"`
-	StartedAt      *time.Time `json:"startedAt,omitempty"`
-	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
+	ID                      int64      `json:"id"`
+	EnvironmentRepositoryID int64      `json:"-"`
+	RepositoryID            string     `json:"repositoryId"`
+	RepositoryName          string     `json:"repositoryName,omitempty"`
+	RunnerID                *int64     `json:"runnerId,omitempty"`
+	RunnerName              string     `json:"runnerName,omitempty"`
+	Provider                string     `json:"provider"`
+	Event                   string     `json:"event"`
+	DeliveryID              string     `json:"deliveryId"`
+	Branch                  string     `json:"branch"`
+	CommitSHA               string     `json:"commitSha"`
+	CommitMessage           string     `json:"commitMessage"`
+	CommitAuthor            string     `json:"commitAuthor"`
+	Status                  string     `json:"status"`
+	ExitCode                *int       `json:"exitCode,omitempty"`
+	Error                   string     `json:"error,omitempty"`
+	TriggeredAt             time.Time  `json:"triggeredAt"`
+	StartedAt               *time.Time `json:"startedAt,omitempty"`
+	FinishedAt              *time.Time `json:"finishedAt,omitempty"`
+	CreatedAt               time.Time  `json:"createdAt"`
 }
 
 type JobLogLine struct {

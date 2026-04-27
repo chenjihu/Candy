@@ -28,7 +28,7 @@ Candy 是一个轻量级 webhook 部署中枢。它对外暴露兼容 GitHub / G
 - 支持系统内置 `Production`、系统内置 `Testing` 和自定义运行环境，并为不同环境提供明显的界面色彩提示。
 - 支持仓库源复用：共享 Git 地址和 deployment key，再按环境分别绑定分支、脚本和 Runner。
 - GitHub `X-Hub-Signature-256` 校验。
-- Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` 签名校验，并兼容旧式 token 等值校验。
+- Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` 标准签名校验。
 - delivery 去重，非目标分支忽略，任务异步入队。
 - 中心服务 clone/fetch，并 checkout 到 webhook 指定 commit。
 - 本机 Runner：在工作目录中执行 `bash -lc`。
@@ -164,6 +164,8 @@ cp env.example .env
 
 Candy 支持多个运行环境。全新安装会自动包含 `Production` 和 `Testing`，管理员也可以在控制台中新增自定义环境。
 
+Candy 仅支持当前这套按环境组织的 schema，不再提供旧数据库结构的原地自动升级；从历史版本迁移时，请使用全新数据库重新初始化服务。
+
 - Runner、Secret、部署绑定和部署历史按环境隔离
 - 界面会用环境专属强调色提示当前操作环境，降低误操作风险
 - 单个系统实例始终至少保留一个环境
@@ -187,7 +189,6 @@ Candy 现在将仓库信息拆成两层：
 - 用户名不存在和密码错误统一返回 `用户名或密码错误`，避免通过错误信息枚举用户。
 - 对不存在的用户也会执行 dummy password hash，降低通过响应时间差异枚举用户的风险。
 - 默认使用 TCP 连接的 remote address 作为来源 IP；只有设置 `CANDY_TRUST_PROXY_HEADERS=true` 后才会读取 `X-Forwarded-For` / `X-Real-IP`。
-- 从旧版本升级时，如果数据库中仍存在 `admin/admin123` 旧默认弱账号，且当前超级管理员用户名不是 `admin`，启动时会自动删除这条旧账号。
 
 如果服务部署在 Nginx、Caddy、Traefik 等反向代理之后，并且需要按真实客户端 IP 限制登录，请确保代理层覆盖并清洗客户端传入的 `X-Forwarded-For` / `X-Real-IP` 后，再开启 `CANDY_TRUST_PROXY_HEADERS=true`。
 

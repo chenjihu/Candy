@@ -7,15 +7,15 @@ import (
 	"testing"
 )
 
-func TestNewPublicIDProducesOpaqueURLSafeValue(t *testing.T) {
-	first, err := newPublicID("env")
+func TestNewOpaqueIDProducesOpaqueURLSafeValue(t *testing.T) {
+	first, err := newOpaqueID("env")
 	if err != nil {
-		t.Fatalf("newPublicID returned error: %v", err)
+		t.Fatalf("newOpaqueID returned error: %v", err)
 	}
 
-	second, err := newPublicID("env")
+	second, err := newOpaqueID("env")
 	if err != nil {
-		t.Fatalf("newPublicID returned error: %v", err)
+		t.Fatalf("newOpaqueID returned error: %v", err)
 	}
 
 	if first == second {
@@ -66,37 +66,45 @@ func TestDeploymentSecretsStayWithinEnvironmentRepository(t *testing.T) {
 	}
 
 	repoA, err := store.CreateEnvironmentRepository(ctx, EnvironmentRepository{
-		EnvironmentKey: envA.PublicID,
-		SourceKey:      source.PublicID,
-		Branch:         "main",
-		WorkDir:        "/srv/prod",
-		DeployScript:   "echo prod",
+		EnvironmentID:      envA.ID,
+		RepositorySourceID: source.ID,
+		Branch:             "main",
+		WorkDir:            "/srv/prod",
+		DeployScript:       "echo prod",
 	})
 	if err != nil {
 		t.Fatalf("CreateEnvironmentRepository(prod) error = %v", err)
 	}
 	repoB, err := store.CreateEnvironmentRepository(ctx, EnvironmentRepository{
-		EnvironmentKey: envB.PublicID,
-		SourceKey:      source.PublicID,
-		Branch:         "develop",
-		WorkDir:        "/srv/staging",
-		DeployScript:   "echo staging",
+		EnvironmentID:      envB.ID,
+		RepositorySourceID: source.ID,
+		Branch:             "develop",
+		WorkDir:            "/srv/staging",
+		DeployScript:       "echo staging",
 	})
 	if err != nil {
 		t.Fatalf("CreateEnvironmentRepository(staging) error = %v", err)
 	}
 
-	prodRepositoryID := mustLegacyRepositoryIDForEnvironmentRepository(t, store, repoA.PublicID)
-	stagingRepositoryID := mustLegacyRepositoryIDForEnvironmentRepository(t, store, repoB.PublicID)
+	prodRepository, err := store.getEnvironmentRepositoryRecordByResourceID(ctx, repoA.ID, false)
+	if err != nil {
+		t.Fatalf("getEnvironmentRepositoryRecordByResourceID(prod) error = %v", err)
+	}
+	stagingRepository, err := store.getEnvironmentRepositoryRecordByResourceID(ctx, repoB.ID, false)
+	if err != nil {
+		t.Fatalf("getEnvironmentRepositoryRecordByResourceID(staging) error = %v", err)
+	}
 
-	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "prod-token", RepositoryID: &prodRepositoryID}); err != nil {
+	prodRepositoryID := prodRepository.InternalID
+	stagingRepositoryID := stagingRepository.InternalID
+	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "prod-token", EnvironmentID: envA.InternalID, EnvironmentRepositoryID: &prodRepositoryID}); err != nil {
 		t.Fatalf("CreateSecret(prod) error = %v", err)
 	}
-	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "staging-token", RepositoryID: &stagingRepositoryID}); err != nil {
+	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "staging-token", EnvironmentID: envB.InternalID, EnvironmentRepositoryID: &stagingRepositoryID}); err != nil {
 		t.Fatalf("CreateSecret(staging) error = %v", err)
 	}
 
-	secrets, err := store.DeploymentSecrets(ctx, repoA.PublicID)
+	secrets, err := store.DeploymentSecrets(ctx, repoA.ID)
 	if err != nil {
 		t.Fatalf("DeploymentSecrets() error = %v", err)
 	}
@@ -140,26 +148,6 @@ func TestNewStoreEnsuresProductionAndTestingEnvironments(t *testing.T) {
 	if testingEnv.Color != "#1F8E5E" {
 		t.Fatalf("testing color = %q, want %q", testingEnv.Color, "#1F8E5E")
 	}
-}
-
-func mustLegacyRepositoryIDForEnvironmentRepository(t *testing.T, store *Store, publicID string) int64 {
-	t.Helper()
-
-	var repositoryID sql.NullInt64
-	err := store.db.QueryRowContext(
-		context.Background(),
-		`SELECT legacy_repository_id
-		 FROM environment_repositories
-		 WHERE public_id = ?`,
-		publicID,
-	).Scan(&repositoryID)
-	if err != nil {
-		t.Fatalf("legacy_repository_id lookup error = %v", err)
-	}
-	if !repositoryID.Valid {
-		t.Fatal("legacy_repository_id = NULL, want populated")
-	}
-	return repositoryID.Int64
 }
 
 func mustEnvironmentBySlug(ctx context.Context, store *Store, slug string) (Environment, error) {

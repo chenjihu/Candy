@@ -28,7 +28,7 @@ Terminology: this document uses Runner for the deployment execution endpoint. Wh
 - Environment-aware deployment bindings with dedicated colors for built-in `Production`, built-in `Testing`, or custom environments.
 - Repository source reuse: keep one shared Git source and deployment key, then bind different branches and scripts per environment.
 - GitHub `X-Hub-Signature-256` verification.
-- Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` signature verification, with legacy token equality fallback.
+- Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` signature verification.
 - Delivery deduplication, ignore non-target branches, and async job queueing.
 - Central service clone/fetch and checkout to the commit referenced by the webhook.
 - Local Runner: run `bash -lc` in the work directory.
@@ -164,6 +164,8 @@ All variables can be provided either through shell environment variables or a `.
 
 Candy supports multiple runtime environments. A fresh installation automatically includes `Production` and `Testing`, and administrators can add custom environments from the dashboard.
 
+Candy supports only the current environment-based schema. Older database layouts are not upgraded in place; reinitialize the service with a fresh database when moving from legacy versions.
+
 - Runners, Secrets, deployment bindings, and deployment history are isolated per environment.
 - The UI highlights the current environment with a dedicated accent color to reduce mistakes.
 - A single installation always keeps at least one environment.
@@ -187,7 +189,6 @@ The login endpoint has brute-force protection enabled by default, and failure co
 - Missing usernames and wrong passwords return the same generic "invalid username or password" message to avoid user enumeration.
 - A dummy password hash is also computed for missing users to reduce timing-based user enumeration.
 - By default, the TCP remote address is used as the source IP. `X-Forwarded-For` / `X-Real-IP` are only read when `CANDY_TRUST_PROXY_HEADERS=true`.
-- When upgrading from older versions, if the database still contains the legacy weak `admin/admin123` account and the current super admin username is not `admin`, the service will remove that old account on startup.
 
 If the service is deployed behind Nginx, Caddy, Traefik, or another reverse proxy and you need login limits based on the real client IP, make sure the proxy overwrites and sanitizes `X-Forwarded-For` / `X-Real-IP` before enabling `CANDY_TRUST_PROXY_HEADERS=true`.
 

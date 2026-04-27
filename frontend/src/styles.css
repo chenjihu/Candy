@@ -686,6 +686,32 @@ code {
   height: 16px;
 }
 
+.confirmation-modal {
+  width: min(100%, 560px);
+  max-height: min(100vh - 48px, 420px);
+}
+
+.confirmation-modal-danger {
+  border-color: rgba(216, 57, 83, 0.2);
+  box-shadow: 0 24px 56px rgba(216, 57, 83, 0.14);
+}
+
+.confirmation-modal-danger::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: 16px 0 0 16px;
+  background: linear-gradient(180deg, #ef3150, #d83953);
+}
+
+.confirmation-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
 .environment-manager {
   display: grid;
   grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);

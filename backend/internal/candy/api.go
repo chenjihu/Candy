@@ -41,7 +41,7 @@ func (a *App) handleCreateEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -55,7 +55,7 @@ func (a *App) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := a.updateEnvironment(r.Context(), publicID, env)
+	updated, err := a.updateEnvironment(r.Context(), resourceID, env)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("environment not found"))
 		return
@@ -68,12 +68,12 @@ func (a *App) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := a.deleteEnvironment(r.Context(), publicID); errors.Is(err, sql.ErrNoRows) {
+	if err := a.deleteEnvironment(r.Context(), resourceID); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("environment not found"))
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -110,7 +110,7 @@ func (a *App) handleCreateRepositorySource(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *App) handleUpdateRepositorySource(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -124,7 +124,7 @@ func (a *App) handleUpdateRepositorySource(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := a.updateRepositorySource(r.Context(), publicID, source)
+	updated, err := a.updateRepositorySource(r.Context(), resourceID, source)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository source not found"))
 		return
@@ -137,12 +137,12 @@ func (a *App) handleUpdateRepositorySource(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *App) handleDeleteRepositorySource(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := a.deleteRepositorySource(r.Context(), publicID); errors.Is(err, sql.ErrNoRows) {
+	if err := a.deleteRepositorySource(r.Context(), resourceID); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository source not found"))
 	} else if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -157,7 +157,7 @@ func (a *App) handleListRunners(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	runners, err := a.listRunnersForEnvironment(r.Context(), env.PublicID)
+	runners, err := a.listRunnersForEnvironment(r.Context(), env.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -244,7 +244,7 @@ func (a *App) handleListRepositories(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	repositories, err := a.store.ListEnvironmentRepositories(r.Context(), env.PublicID)
+	repositories, err := a.store.ListEnvironmentRepositories(r.Context(), env.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -253,12 +253,12 @@ func (a *App) handleListRepositories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleGetRepository(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	repository, err := a.store.getEnvironmentRepositoryRecordByPublicID(r.Context(), publicID, false)
+	repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(r.Context(), resourceID, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 		return
@@ -276,12 +276,12 @@ func (a *App) handleCreateRepository(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	runnerID, err := parseRunnerKey(repo.RunnerKey)
+	runnerID, err := parseRunnerID(repo.RunnerID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	repo.RunnerID = runnerID
+	repo.RunnerInternalID = runnerID
 	if err := validateEnvironmentRepository(repo); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -299,7 +299,7 @@ func (a *App) handleCreateRepository(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleUpdateRepository(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -309,17 +309,17 @@ func (a *App) handleUpdateRepository(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	runnerID, err := parseRunnerKey(repo.RunnerKey)
+	runnerID, err := parseRunnerID(repo.RunnerID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	repo.RunnerID = runnerID
+	repo.RunnerInternalID = runnerID
 	if err := validateEnvironmentRepository(repo); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := a.updateEnvironmentRepository(r.Context(), publicID, repo)
+	updated, err := a.updateEnvironmentRepository(r.Context(), resourceID, repo)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 		return
@@ -332,12 +332,12 @@ func (a *App) handleUpdateRepository(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleDeleteRepository(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := a.deleteEnvironmentRepository(r.Context(), publicID); errors.Is(err, sql.ErrNoRows) {
+	if err := a.deleteEnvironmentRepository(r.Context(), resourceID); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -352,7 +352,7 @@ func (a *App) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	secrets, err := a.listSecretsForEnvironment(r.Context(), env.PublicID)
+	secrets, err := a.listSecretsForEnvironment(r.Context(), env.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -361,8 +361,17 @@ func (a *App) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
+	env, status, err := a.requireEnvironment(r.Context(), r)
+	if err != nil {
+		writeError(w, status, err)
+		return
+	}
 	var secret Secret
 	if err := decodeJSON(r, &secret); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := a.resolveSecretRepositoryScope(r.Context(), env.ID, &secret); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -384,8 +393,17 @@ func (a *App) handleUpdateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	env, status, err := a.requireEnvironment(r.Context(), r)
+	if err != nil {
+		writeError(w, status, err)
+		return
+	}
 	var secret Secret
 	if err := decodeJSON(r, &secret); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := a.resolveSecretRepositoryScope(r.Context(), env.ID, &secret); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -415,7 +433,7 @@ func (a *App) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleManualTrigger(w http.ResponseWriter, r *http.Request) {
-	publicID, err := pathPublicID(r)
+	resourceID, err := pathResourceID(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -426,7 +444,7 @@ func (a *App) handleManualTrigger(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = decodeJSON(r, &req)
 	}
-	repository, err := a.store.getEnvironmentRepositoryRecordByPublicID(r.Context(), publicID, false)
+	repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(r.Context(), resourceID, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 		return
@@ -435,27 +453,26 @@ func (a *App) handleManualTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	if !repository.LegacyRepositoryID.Valid {
-		writeError(w, http.StatusInternalServerError, errors.New("repository is missing legacy binding"))
-		return
-	}
 	token, err := randomToken(12)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	job, err := a.store.CreateJob(r.Context(), DeployJob{
-		RepositoryID:  repository.LegacyRepositoryID.Int64,
-		RunnerID:      repository.RunnerID,
-		Provider:      repository.Provider,
-		Event:         "manual",
-		DeliveryID:    "manual-" + token,
-		Branch:        repository.Branch,
-		CommitSHA:     strings.TrimSpace(req.CommitSHA),
-		CommitMessage: "manual deployment",
-		CommitAuthor:  "admin",
-		Status:        "queued",
-		TriggeredAt:   time.Now(),
+		EnvironmentRepositoryID: repository.InternalID,
+		RepositoryID:            repository.ID,
+		RepositoryName:          repository.Name,
+		RunnerID:                repository.RunnerInternalID,
+		RunnerName:              repository.Runner,
+		Provider:                repository.Provider,
+		Event:                   "manual",
+		DeliveryID:              "manual-" + token,
+		Branch:                  repository.Branch,
+		CommitSHA:               strings.TrimSpace(req.CommitSHA),
+		CommitMessage:           "manual deployment",
+		CommitAuthor:            "admin",
+		Status:                  "queued",
+		TriggeredAt:             time.Now(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -473,7 +490,7 @@ func (a *App) handleListJobs(w http.ResponseWriter, r *http.Request) {
 
 	repositoryID := strings.TrimSpace(r.URL.Query().Get("repositoryId"))
 	if repositoryID != "" {
-		repository, err := a.store.getEnvironmentRepositoryRecordByPublicID(r.Context(), repositoryID, false)
+		repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(r.Context(), repositoryID, false)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, errors.New("repository not found"))
 			return
@@ -482,15 +499,11 @@ func (a *App) handleListJobs(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if repository.EnvironmentKey != env.PublicID {
+		if repository.EnvironmentID != env.ID {
 			writeError(w, http.StatusNotFound, errors.New("repository not found"))
 			return
 		}
-		if !repository.LegacyRepositoryID.Valid {
-			writeError(w, http.StatusInternalServerError, errors.New("repository is missing legacy binding"))
-			return
-		}
-		jobs, err := a.store.ListJobs(r.Context(), repository.LegacyRepositoryID.Int64)
+		jobs, err := a.store.ListJobs(r.Context(), repository.InternalID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -499,7 +512,7 @@ func (a *App) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobs, err := a.listJobsForEnvironment(r.Context(), env.PublicID)
+	jobs, err := a.listJobsForEnvironment(r.Context(), env.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -540,7 +553,7 @@ func (a *App) requireEnvironment(ctx context.Context, r *http.Request) (Environm
 	if err != nil {
 		return Environment{}, http.StatusBadRequest, err
 	}
-	environment, err := a.store.getEnvironmentByPublicID(ctx, environmentID)
+	environment, err := a.store.getEnvironmentByID(ctx, environmentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Environment{}, http.StatusNotFound, errors.New("environment not found")
 	}
@@ -550,7 +563,7 @@ func (a *App) requireEnvironment(ctx context.Context, r *http.Request) (Environm
 	return environment, 0, nil
 }
 
-func (a *App) listRunnersForEnvironment(ctx context.Context, environmentPublicID string) ([]Runner, error) {
+func (a *App) listRunnersForEnvironment(ctx context.Context, environmentID string) ([]Runner, error) {
 	rows, err := a.store.db.QueryContext(ctx,
 		`SELECT DISTINCT r.id, r.name, r.mode, r.host, r.port, r.username, r.work_root, r.private_key_cipher,
 		        r.created_at, r.updated_at
@@ -559,7 +572,7 @@ func (a *App) listRunnersForEnvironment(ctx context.Context, environmentPublicID
 		 INNER JOIN environments e ON e.id = er.environment_id
 		 WHERE e.public_id = ?
 		 ORDER BY r.id DESC`,
-		environmentPublicID,
+		environmentID,
 	)
 	if err != nil {
 		return nil, err
@@ -577,16 +590,17 @@ func (a *App) listRunnersForEnvironment(ctx context.Context, environmentPublicID
 	return runners, rows.Err()
 }
 
-func (a *App) listSecretsForEnvironment(ctx context.Context, environmentPublicID string) ([]Secret, error) {
+func (a *App) listSecretsForEnvironment(ctx context.Context, environmentID string) ([]Secret, error) {
 	rows, err := a.store.db.QueryContext(ctx,
-		`SELECT s.id, s.name, s.value_cipher, s.repository_id, COALESCE(r.name, ''), s.created_at, s.updated_at
+		`SELECT s.id, s.name, s.value_cipher, s.environment_id, s.environment_repository_id,
+		        COALESCE(er.public_id, ''), COALESCE(src.name, ''), s.created_at, s.updated_at
 		 FROM secrets s
-		 LEFT JOIN repositories r ON r.id = s.repository_id
-		 LEFT JOIN environment_repositories er ON er.legacy_repository_id = s.repository_id
-		 LEFT JOIN environments e ON e.id = er.environment_id
-		 WHERE s.repository_id IS NULL OR e.public_id = ?
-		 ORDER BY s.repository_id IS NOT NULL, COALESCE(r.name, ''), s.name`,
-		environmentPublicID,
+		 LEFT JOIN environment_repositories er ON er.id = s.environment_repository_id
+		 LEFT JOIN repository_sources src ON src.id = er.repository_source_id
+		 INNER JOIN environments e ON e.id = s.environment_id
+		 WHERE e.public_id = ?
+		 ORDER BY s.environment_repository_id IS NOT NULL, COALESCE(src.name, ''), s.name`,
+		environmentID,
 	)
 	if err != nil {
 		return nil, err
@@ -604,15 +618,14 @@ func (a *App) listSecretsForEnvironment(ctx context.Context, environmentPublicID
 	return secrets, rows.Err()
 }
 
-func (a *App) listJobsForEnvironment(ctx context.Context, environmentPublicID string) ([]DeployJob, error) {
+func (a *App) listJobsForEnvironment(ctx context.Context, environmentID string) ([]DeployJob, error) {
 	rows, err := a.store.db.QueryContext(ctx,
 		jobSelectSQL()+`
-		 INNER JOIN environment_repositories er ON er.legacy_repository_id = j.repository_id
 		 INNER JOIN environments e ON e.id = er.environment_id
 		 WHERE e.public_id = ?
 		 ORDER BY j.id DESC
 		 LIMIT 200`,
-		environmentPublicID,
+		environmentID,
 	)
 	if err != nil {
 		return nil, err
@@ -630,7 +643,7 @@ func (a *App) listJobsForEnvironment(ctx context.Context, environmentPublicID st
 	return jobs, rows.Err()
 }
 
-func (a *App) updateEnvironment(ctx context.Context, publicID string, env Environment) (Environment, error) {
+func (a *App) updateEnvironment(ctx context.Context, resourceID string, env Environment) (Environment, error) {
 	result, err := a.store.db.ExecContext(ctx,
 		`UPDATE environments
 		 SET name = ?, slug = ?, description = ?, color = ?, updated_at = ?
@@ -640,7 +653,7 @@ func (a *App) updateEnvironment(ctx context.Context, publicID string, env Enviro
 		strings.TrimSpace(env.Description),
 		strings.TrimSpace(env.Color),
 		dbTime(time.Now()),
-		publicID,
+		resourceID,
 	)
 	if err != nil {
 		return Environment{}, err
@@ -652,11 +665,11 @@ func (a *App) updateEnvironment(ctx context.Context, publicID string, env Enviro
 	if rowsAffected == 0 {
 		return Environment{}, sql.ErrNoRows
 	}
-	return a.store.getEnvironmentByPublicID(ctx, publicID)
+	return a.store.getEnvironmentByID(ctx, resourceID)
 }
 
-func (a *App) deleteEnvironment(ctx context.Context, publicID string) error {
-	environment, err := a.store.getEnvironmentByPublicID(ctx, publicID)
+func (a *App) deleteEnvironment(ctx context.Context, resourceID string) error {
+	environment, err := a.store.getEnvironmentByID(ctx, resourceID)
 	if err != nil {
 		return err
 	}
@@ -668,45 +681,42 @@ func (a *App) deleteEnvironment(ctx context.Context, publicID string) error {
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT legacy_repository_id
+		`SELECT repository_source_id
 		 FROM environment_repositories
-		 WHERE environment_id = ?
-		   AND legacy_repository_id IS NOT NULL`,
-		environment.ID,
+		 WHERE environment_id = ?`,
+		environment.InternalID,
 	)
 	if err != nil {
 		return err
 	}
 
-	legacyRepositoryIDs := make([]int64, 0)
+	repositorySourceIDs := make([]int64, 0)
 	for rows.Next() {
-		var repositoryID int64
-		if err := rows.Scan(&repositoryID); err != nil {
+		var repositorySourceID int64
+		if err := rows.Scan(&repositorySourceID); err != nil {
 			rows.Close()
 			return err
 		}
-		legacyRepositoryIDs = append(legacyRepositoryIDs, repositoryID)
+		repositorySourceIDs = append(repositorySourceIDs, repositorySourceID)
 	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_repositories WHERE environment_id = ?`, environment.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_repositories WHERE environment_id = ?`, environment.InternalID); err != nil {
 		return err
 	}
-	for _, repositoryID := range legacyRepositoryIDs {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repositoryID); err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environments WHERE id = ?`, environment.InternalID); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM environments WHERE id = ?`, environment.ID); err != nil {
+	if err := deleteRepositorySourcesWithoutBindings(ctx, tx, repositorySourceIDs); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (a *App) updateRepositorySource(ctx context.Context, publicID string, source RepositorySource) (RepositorySource, error) {
-	existing, err := a.store.getRepositorySourceRecordByPublicID(ctx, publicID, true)
+func (a *App) updateRepositorySource(ctx context.Context, resourceID string, source RepositorySource) (RepositorySource, error) {
+	existing, err := a.store.getRepositorySourceRecordByResourceID(ctx, resourceID, true)
 	if err != nil {
 		return RepositorySource{}, err
 	}
@@ -736,25 +746,7 @@ func (a *App) updateRepositorySource(ctx context.Context, publicID string, sourc
 		strings.TrimSpace(source.RepoURL),
 		deployKeyCipher,
 		now,
-		publicID,
-	); err != nil {
-		return RepositorySource{}, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE repositories
-		 SET name = ?, provider = ?, repo_url = ?, deploy_key_cipher = ?, updated_at = ?
-		 WHERE id IN (
-		 	SELECT legacy_repository_id
-		 	FROM environment_repositories
-		 	WHERE repository_source_id = ?
-		 	  AND legacy_repository_id IS NOT NULL
-		 )`,
-		strings.TrimSpace(source.Name),
-		normalizeProvider(source.Provider),
-		strings.TrimSpace(source.RepoURL),
-		deployKeyCipher,
-		now,
-		existing.ID,
+		resourceID,
 	); err != nil {
 		return RepositorySource{}, err
 	}
@@ -762,15 +754,15 @@ func (a *App) updateRepositorySource(ctx context.Context, publicID string, sourc
 		return RepositorySource{}, err
 	}
 
-	updated, err := a.store.getRepositorySourceRecordByPublicID(ctx, publicID, false)
+	updated, err := a.store.getRepositorySourceRecordByResourceID(ctx, resourceID, false)
 	if err != nil {
 		return RepositorySource{}, err
 	}
 	return updated.RepositorySource, nil
 }
 
-func (a *App) deleteRepositorySource(ctx context.Context, publicID string) error {
-	source, err := a.store.getRepositorySourceRecordByPublicID(ctx, publicID, false)
+func (a *App) deleteRepositorySource(ctx context.Context, resourceID string) error {
+	source, err := a.store.getRepositorySourceRecordByResourceID(ctx, resourceID, false)
 	if err != nil {
 		return err
 	}
@@ -780,7 +772,7 @@ func (a *App) deleteRepositorySource(ctx context.Context, publicID string) error
 		`SELECT COUNT(*)
 		 FROM environment_repositories
 		 WHERE repository_source_id = ?`,
-		source.ID,
+		source.InternalID,
 	).Scan(&bindings); err != nil {
 		return err
 	}
@@ -788,27 +780,23 @@ func (a *App) deleteRepositorySource(ctx context.Context, publicID string) error
 		return errors.New("repository source is still bound to one or more environments")
 	}
 
-	_, err = a.store.db.ExecContext(ctx, `DELETE FROM repository_sources WHERE id = ?`, source.ID)
+	_, err = a.store.db.ExecContext(ctx, `DELETE FROM repository_sources WHERE id = ?`, source.InternalID)
 	return err
 }
 
-func (a *App) updateEnvironmentRepository(ctx context.Context, publicID string, repo EnvironmentRepository) (EnvironmentRepository, error) {
-	existing, err := a.store.getEnvironmentRepositoryRecordByPublicID(ctx, publicID, true)
+func (a *App) updateEnvironmentRepository(ctx context.Context, resourceID string, repo EnvironmentRepository) (EnvironmentRepository, error) {
+	existing, err := a.store.getEnvironmentRepositoryRecordByResourceID(ctx, resourceID, true)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
-	environment, err := a.store.getEnvironmentByPublicID(ctx, repo.EnvironmentKey)
+	environment, err := a.store.getEnvironmentByID(ctx, repo.EnvironmentID)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
-	source, err := a.store.getRepositorySourceRecordByPublicID(ctx, repo.SourceKey, true)
+	source, err := a.store.getRepositorySourceRecordByResourceID(ctx, repo.RepositorySourceID, true)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
-	if !existing.LegacyRepositoryID.Valid {
-		return EnvironmentRepository{}, errors.New("repository is missing legacy binding")
-	}
-
 	webhookSecret := existing.WebhookSecret
 	if strings.TrimSpace(repo.WebhookSecret) != "" {
 		webhookSecret = strings.TrimSpace(repo.WebhookSecret)
@@ -826,40 +814,20 @@ func (a *App) updateEnvironmentRepository(ctx context.Context, publicID string, 
 
 	now := dbTime(time.Now())
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE repositories
-		 SET name = ?, provider = ?, repo_url = ?, webhook_secret_cipher = ?, branch = ?, work_dir = ?,
-		     deploy_key_cipher = ?, deploy_script = ?, runner_id = ?, clean_worktree = ?, updated_at = ?
-		 WHERE id = ?`,
-		source.Name,
-		source.Provider,
-		source.RepoURL,
-		webhookSecretCipher,
-		normalizeBranch(repo.Branch),
-		strings.TrimSpace(repo.WorkDir),
-		source.DeployKeyCipher,
-		strings.TrimSpace(repo.DeployScript),
-		nullableInt64(repo.RunnerID),
-		boolInt(repo.CleanWorktree),
-		now,
-		existing.LegacyRepositoryID.Int64,
-	); err != nil {
-		return EnvironmentRepository{}, err
-	}
-	if _, err := tx.ExecContext(ctx,
 		`UPDATE environment_repositories
 		 SET environment_id = ?, repository_source_id = ?, webhook_secret_cipher = ?, branch = ?, work_dir = ?,
 		     deploy_script = ?, runner_id = ?, clean_worktree = ?, updated_at = ?
 		 WHERE public_id = ?`,
-		environment.ID,
-		source.ID,
+		environment.InternalID,
+		source.InternalID,
 		webhookSecretCipher,
 		normalizeBranch(repo.Branch),
 		strings.TrimSpace(repo.WorkDir),
 		strings.TrimSpace(repo.DeployScript),
-		nullableInt64(repo.RunnerID),
+		nullableInt64(repo.RunnerInternalID),
 		boolInt(repo.CleanWorktree),
 		now,
-		publicID,
+		resourceID,
 	); err != nil {
 		return EnvironmentRepository{}, err
 	}
@@ -867,15 +835,15 @@ func (a *App) updateEnvironmentRepository(ctx context.Context, publicID string, 
 		return EnvironmentRepository{}, err
 	}
 
-	updated, err := a.store.getEnvironmentRepositoryRecordByPublicID(ctx, publicID, false)
+	updated, err := a.store.getEnvironmentRepositoryRecordByResourceID(ctx, resourceID, false)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
 	return updated.EnvironmentRepository, nil
 }
 
-func (a *App) deleteEnvironmentRepository(ctx context.Context, publicID string) error {
-	repository, err := a.store.getEnvironmentRepositoryRecordByPublicID(ctx, publicID, false)
+func (a *App) deleteEnvironmentRepository(ctx context.Context, resourceID string) error {
+	repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(ctx, resourceID, false)
 	if err != nil {
 		return err
 	}
@@ -886,15 +854,50 @@ func (a *App) deleteEnvironmentRepository(ctx context.Context, publicID string) 
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_repositories WHERE public_id = ?`, publicID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM environment_repositories WHERE public_id = ?`, resourceID); err != nil {
 		return err
 	}
-	if repository.LegacyRepositoryID.Valid {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repository.LegacyRepositoryID.Int64); err != nil {
+	if err := deleteRepositorySourcesWithoutBindings(ctx, tx, []int64{repository.RepositorySourceInternalID}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func deleteRepositorySourcesWithoutBindings(ctx context.Context, tx *sql.Tx, sourceIDs []int64) error {
+	for _, sourceID := range uniqueInt64s(sourceIDs) {
+		var bindings int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*)
+			 FROM environment_repositories
+			 WHERE repository_source_id = ?`,
+			sourceID,
+		).Scan(&bindings); err != nil {
+			return err
+		}
+		if bindings > 0 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM repository_sources WHERE id = ?`, sourceID); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
+}
+
+func uniqueInt64s(values []int64) []int64 {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(values))
+	unique := make([]int64, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 func validateRunner(runner Runner) error {
@@ -934,30 +937,11 @@ func validateRepositorySource(source RepositorySource) error {
 }
 
 func validateEnvironmentRepository(repo EnvironmentRepository) error {
-	if strings.TrimSpace(repo.EnvironmentKey) == "" {
+	if strings.TrimSpace(repo.EnvironmentID) == "" {
 		return errors.New("environmentId is required")
 	}
-	if strings.TrimSpace(repo.SourceKey) == "" {
+	if strings.TrimSpace(repo.RepositorySourceID) == "" {
 		return errors.New("repositorySourceId is required")
-	}
-	if strings.TrimSpace(repo.Branch) == "" {
-		return errors.New("trigger branch is required")
-	}
-	if strings.TrimSpace(repo.WorkDir) == "" {
-		return errors.New("work directory is required")
-	}
-	if strings.TrimSpace(repo.DeployScript) == "" {
-		return errors.New("deploy script is required")
-	}
-	return nil
-}
-
-func validateRepository(repo Repository) error {
-	if strings.TrimSpace(repo.Name) == "" {
-		return errors.New("repository name is required")
-	}
-	if strings.TrimSpace(repo.RepoURL) == "" {
-		return errors.New("repository URL is required")
 	}
 	if strings.TrimSpace(repo.Branch) == "" {
 		return errors.New("trigger branch is required")
@@ -985,7 +969,34 @@ func validateSecret(secret Secret, requireValue bool) error {
 	return nil
 }
 
-func parseRunnerKey(raw string) (*int64, error) {
+func (a *App) resolveSecretRepositoryScope(ctx context.Context, environmentID string, secret *Secret) error {
+	environment, err := a.store.getEnvironmentByID(ctx, environmentID)
+	if err != nil {
+		return err
+	}
+	secret.EnvironmentID = environment.InternalID
+	secret.EnvironmentRepositoryID = nil
+	secret.RepositoryID = strings.TrimSpace(secret.RepositoryID)
+	if secret.RepositoryID == "" {
+		return nil
+	}
+
+	repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(ctx, secret.RepositoryID, false)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("repository not found")
+	}
+	if err != nil {
+		return err
+	}
+	if repository.EnvironmentID != environmentID {
+		return errors.New("repository is not in the selected environment")
+	}
+	repositoryID := repository.InternalID
+	secret.EnvironmentRepositoryID = &repositoryID
+	return nil
+}
+
+func parseRunnerID(raw string) (*int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil

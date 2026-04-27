@@ -41,26 +41,30 @@ func TestDeploymentSecretsRepositoryOverridesGlobal(t *testing.T) {
 		t.Fatalf("CreateRepositorySource() error = %v", err)
 	}
 	repo, err := store.CreateEnvironmentRepository(ctx, EnvironmentRepository{
-		EnvironmentKey: env.PublicID,
-		SourceKey:      source.PublicID,
-		Branch:         "main",
-		WorkDir:        "/srv/app",
-		DeployScript:   "echo ok",
-		CleanWorktree:  true,
+		EnvironmentID:      env.ID,
+		RepositorySourceID: source.ID,
+		Branch:             "main",
+		WorkDir:            "/srv/app",
+		DeployScript:       "echo ok",
+		CleanWorktree:      true,
 	})
 	if err != nil {
 		t.Fatalf("CreateEnvironmentRepository() error = %v", err)
 	}
-	legacyRepositoryID := mustLegacyRepositoryIDForEnvironmentRepository(t, store, repo.PublicID)
+	repoRecord, err := store.getEnvironmentRepositoryRecordByResourceID(ctx, repo.ID, false)
+	if err != nil {
+		t.Fatalf("getEnvironmentRepositoryRecordByResourceID() error = %v", err)
+	}
 
-	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "global"}); err != nil {
+	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "global", EnvironmentID: env.InternalID}); err != nil {
 		t.Fatalf("CreateSecret(global) error = %v", err)
 	}
-	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "repo", RepositoryID: &legacyRepositoryID}); err != nil {
+	repoID := repoRecord.InternalID
+	if _, err := store.CreateSecret(ctx, Secret{Name: "API_TOKEN", Value: "repo", EnvironmentID: env.InternalID, EnvironmentRepositoryID: &repoID}); err != nil {
 		t.Fatalf("CreateSecret(repo) error = %v", err)
 	}
 
-	secrets, err := store.DeploymentSecrets(ctx, repo.PublicID)
+	secrets, err := store.DeploymentSecrets(ctx, repo.ID)
 	if err != nil {
 		t.Fatalf("DeploymentSecrets() error = %v", err)
 	}

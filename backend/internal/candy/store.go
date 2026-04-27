@@ -47,10 +47,6 @@ func NewStore(ctx context.Context, cfg Config, box SecretBox) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := store.removeLegacyDefaultAdmin(ctx, cfg.AdminUsername); err != nil {
-		db.Close()
-		return nil, err
-	}
 	return store, nil
 }
 
@@ -60,9 +56,6 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		return err
-	}
-	if err := s.migrateRunnerTerminology(ctx); err != nil {
 		return err
 	}
 	statements := []string{
@@ -109,7 +102,6 @@ func (s *Store) migrate(ctx context.Context) error {
 			public_id TEXT NOT NULL UNIQUE,
 			environment_id INTEGER NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
 			repository_source_id INTEGER NOT NULL REFERENCES repository_sources(id) ON DELETE CASCADE,
-			legacy_repository_id INTEGER NULL UNIQUE,
 			webhook_secret_cipher TEXT NOT NULL,
 			webhook_id TEXT NOT NULL UNIQUE CHECK (webhook_id <> ''),
 			branch TEXT NOT NULL,
@@ -127,37 +119,24 @@ func (s *Store) migrate(ctx context.Context) error {
 			ON environment_repositories(repository_source_id, id);`,
 		`CREATE INDEX IF NOT EXISTS environment_repositories_runner_idx
 			ON environment_repositories(runner_id, id);`,
-		`CREATE TABLE IF NOT EXISTS repositories (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			provider TEXT NOT NULL DEFAULT 'github',
-			repo_url TEXT NOT NULL,
-			webhook_secret_cipher TEXT NOT NULL,
-			branch TEXT NOT NULL,
-			work_dir TEXT NOT NULL,
-			deploy_key_cipher TEXT NOT NULL DEFAULT '',
-			deploy_script TEXT NOT NULL,
-			runner_id INTEGER NULL REFERENCES runners(id) ON DELETE SET NULL,
-			clean_worktree INTEGER NOT NULL DEFAULT 1,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);`,
 		`CREATE TABLE IF NOT EXISTS secrets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
 			value_cipher TEXT NOT NULL,
-			repository_id INTEGER NULL REFERENCES repositories(id) ON DELETE CASCADE,
+			environment_id INTEGER NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+			environment_repository_id INTEGER NULL REFERENCES environment_repositories(id) ON DELETE CASCADE,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
-			UNIQUE(name, repository_id)
+			UNIQUE(environment_id, environment_repository_id, name)
 		);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS secrets_global_name_idx
-			ON secrets(name)
-			WHERE repository_id IS NULL;`,
-		`CREATE INDEX IF NOT EXISTS secrets_repository_idx ON secrets(repository_id, name);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS secrets_environment_global_name_idx
+			ON secrets(environment_id, name)
+			WHERE environment_repository_id IS NULL;`,
+		`CREATE INDEX IF NOT EXISTS secrets_environment_repository_idx
+			ON secrets(environment_repository_id, name);`,
 		`CREATE TABLE IF NOT EXISTS deploy_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+			environment_repository_id INTEGER NOT NULL REFERENCES environment_repositories(id) ON DELETE CASCADE,
 			runner_id INTEGER NULL REFERENCES runners(id) ON DELETE SET NULL,
 			provider TEXT NOT NULL,
 			event TEXT NOT NULL,
@@ -175,10 +154,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS deploy_jobs_delivery_idx
-			ON deploy_jobs(repository_id, delivery_id)
+			ON deploy_jobs(environment_repository_id, delivery_id)
 			WHERE delivery_id <> '';`,
 		`CREATE INDEX IF NOT EXISTS deploy_jobs_status_idx ON deploy_jobs(status, id);`,
-		`CREATE INDEX IF NOT EXISTS deploy_jobs_repository_idx ON deploy_jobs(repository_id, id);`,
+		`CREATE INDEX IF NOT EXISTS deploy_jobs_environment_repository_idx
+			ON deploy_jobs(environment_repository_id, id);`,
 		`CREATE TABLE IF NOT EXISTS job_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			job_id INTEGER NOT NULL REFERENCES deploy_jobs(id) ON DELETE CASCADE,
@@ -201,10 +181,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := s.migrateRepositorySplitSchema(ctx); err != nil {
-		return err
-	}
-	return s.migrateRepositorySplit(ctx)
+	_, _ = s.db.ExecContext(ctx, `DROP TABLE IF EXISTS repositories`)
+	_, err := s.ensureDefaultEnvironment(ctx)
+	return err
 }
 
 func (s *Store) ensureDefaultEnvironment(ctx context.Context) (Environment, error) {
@@ -219,7 +198,7 @@ func (s *Store) ensureDefaultEnvironment(ctx context.Context) (Environment, erro
 
 	now := dbTime(time.Now())
 	for _, defaultEnvironment := range defaults {
-		publicID, err := newPublicID("env")
+		resourceID, err := newOpaqueID("env")
 		if err != nil {
 			return Environment{}, err
 		}
@@ -227,7 +206,7 @@ func (s *Store) ensureDefaultEnvironment(ctx context.Context) (Environment, erro
 			`INSERT OR IGNORE INTO environments
 			 (public_id, name, slug, description, color, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			publicID, defaultEnvironment.Name, defaultEnvironment.Slug, "", defaultEnvironment.Color, now, now,
+			resourceID, defaultEnvironment.Name, defaultEnvironment.Slug, "", defaultEnvironment.Color, now, now,
 		); err != nil {
 			return Environment{}, err
 		}
@@ -253,8 +232,8 @@ func (s *Store) getEnvironmentBySlug(ctx context.Context, slug string) (Environm
 		 WHERE slug = ?`,
 		slug,
 	).Scan(
+		&environment.InternalID,
 		&environment.ID,
-		&environment.PublicID,
 		&environment.Name,
 		&environment.Slug,
 		&environment.Description,
@@ -267,805 +246,6 @@ func (s *Store) getEnvironmentBySlug(ctx context.Context, slug string) (Environm
 	environment.CreatedAt = parseDBTime(createdAtRaw)
 	environment.UpdatedAt = parseDBTime(updatedAtRaw)
 	return environment, nil
-}
-
-func (s *Store) migrateRepositorySplit(ctx context.Context) error {
-	defaultEnvironment, err := s.ensureDefaultEnvironment(ctx)
-	if err != nil {
-		return err
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id, name, provider, repo_url, webhook_secret_cipher, branch, work_dir,
-		        deploy_key_cipher, deploy_script, runner_id, clean_worktree, created_at, updated_at
-		 FROM repositories
-		 ORDER BY id`,
-	)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type legacyRepository struct {
-		ID                  int64
-		Name                string
-		Provider            string
-		RepoURL             string
-		WebhookSecretCipher string
-		Branch              string
-		WorkDir             string
-		DeployKeyCipher     string
-		DeployScript        string
-		RunnerID            sql.NullInt64
-		CleanWorktree       int
-		CreatedAt           string
-		UpdatedAt           string
-	}
-
-	repositories := make([]legacyRepository, 0)
-	for rows.Next() {
-		var repository legacyRepository
-		if err := rows.Scan(
-			&repository.ID,
-			&repository.Name,
-			&repository.Provider,
-			&repository.RepoURL,
-			&repository.WebhookSecretCipher,
-			&repository.Branch,
-			&repository.WorkDir,
-			&repository.DeployKeyCipher,
-			&repository.DeployScript,
-			&repository.RunnerID,
-			&repository.CleanWorktree,
-			&repository.CreatedAt,
-			&repository.UpdatedAt,
-		); err != nil {
-			return err
-		}
-		repositories = append(repositories, repository)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	usedRepositorySourceNames, err := s.loadUsedRepositorySourceNames(ctx, tx)
-	if err != nil {
-		return err
-	}
-
-	for _, repository := range repositories {
-		var existingID int64
-		err := tx.QueryRowContext(ctx,
-			`SELECT id
-			 FROM environment_repositories
-			 WHERE legacy_repository_id = ?`,
-			repository.ID,
-		).Scan(&existingID)
-		if err == nil {
-			continue
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-
-		sourcePublicID, err := newPublicID("src")
-		if err != nil {
-			return err
-		}
-		sourceName := nextUniqueRepositorySourceName(repository.Name, usedRepositorySourceNames)
-		sourceResult, err := tx.ExecContext(ctx,
-			`INSERT INTO repository_sources
-			 (public_id, name, provider, repo_url, deploy_key_cipher, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			sourcePublicID, sourceName, repository.Provider, repository.RepoURL,
-			repository.DeployKeyCipher, repository.CreatedAt, repository.UpdatedAt,
-		)
-		if err != nil {
-			return err
-		}
-		sourceID, err := sourceResult.LastInsertId()
-		if err != nil {
-			return err
-		}
-
-		environmentRepositoryPublicID, err := newPublicID("repo")
-		if err != nil {
-			return err
-		}
-		webhookID, err := newPublicID("wh")
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO environment_repositories
-			 (public_id, environment_id, repository_source_id, legacy_repository_id,
-			  webhook_secret_cipher, webhook_id, branch, work_dir, deploy_script, runner_id, clean_worktree,
-			  created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			environmentRepositoryPublicID, defaultEnvironment.ID, sourceID, repository.ID,
-			repository.WebhookSecretCipher, webhookID, repository.Branch, repository.WorkDir, repository.DeployScript,
-			nullableSQLInt64(repository.RunnerID), repository.CleanWorktree, repository.CreatedAt, repository.UpdatedAt,
-		); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-func (s *Store) migrateRepositorySplitSchema(ctx context.Context) error {
-	environmentsNeedRebuild, err := s.tableNeedsUniqueColumns(ctx, "environments", "name")
-	if err != nil {
-		return err
-	}
-	repositorySourcesNeedRebuild, err := s.tableNeedsUniqueColumns(ctx, "repository_sources", "name")
-	if err != nil {
-		return err
-	}
-	environmentRepositoriesHasName, err := s.tableHasColumn(ctx, "environment_repositories", "name")
-	if err != nil {
-		return err
-	}
-	environmentRepositoriesWebhookUniqueMissing, err := s.tableNeedsUniqueColumns(ctx, "environment_repositories", "webhook_id")
-	if err != nil {
-		return err
-	}
-	environmentRepositoriesHasLegacyRepositoryID, err := s.tableHasColumn(ctx, "environment_repositories", "legacy_repository_id")
-	if err != nil {
-		return err
-	}
-	environmentRepositoriesHasWebhookID, err := s.tableHasColumn(ctx, "environment_repositories", "webhook_id")
-	if err != nil {
-		return err
-	}
-	environmentRepositoriesHasEmptyWebhookID := false
-	if environmentRepositoriesHasWebhookID {
-		environmentRepositoriesHasEmptyWebhookID, err = s.tableHasBlankStringValue(ctx, "environment_repositories", "webhook_id")
-		if err != nil {
-			return err
-		}
-	}
-
-	if !environmentsNeedRebuild &&
-		!repositorySourcesNeedRebuild &&
-		!environmentRepositoriesHasName &&
-		environmentRepositoriesHasLegacyRepositoryID &&
-		environmentRepositoriesHasWebhookID &&
-		!environmentRepositoriesHasEmptyWebhookID &&
-		!environmentRepositoriesWebhookUniqueMissing {
-		return nil
-	}
-
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF;`); err != nil {
-		return err
-	}
-	defer conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON;`)
-
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if environmentsNeedRebuild {
-		if err := s.rebuildEnvironmentsTable(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if repositorySourcesNeedRebuild {
-		if err := s.rebuildRepositorySourcesTable(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if environmentRepositoriesHasName || !environmentRepositoriesHasLegacyRepositoryID || !environmentRepositoriesHasWebhookID || environmentRepositoriesHasEmptyWebhookID || environmentRepositoriesWebhookUniqueMissing {
-		if err := s.rebuildEnvironmentRepositoriesTable(ctx, tx); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-func (s *Store) rebuildEnvironmentsTable(ctx context.Context, tx *sql.Tx) error {
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE environments RENAME TO environments_split_schema_old;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE environments (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		public_id TEXT NOT NULL UNIQUE,
-		name TEXT NOT NULL UNIQUE,
-		slug TEXT NOT NULL UNIQUE,
-		description TEXT NOT NULL DEFAULT '',
-		color TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	);`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO environments
-		(id, public_id, name, slug, description, color, created_at, updated_at)
-		SELECT id, public_id, name, slug, description, color, created_at, updated_at
-		FROM environments_split_schema_old;`); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `DROP TABLE environments_split_schema_old;`)
-	return err
-}
-
-func (s *Store) rebuildRepositorySourcesTable(ctx context.Context, tx *sql.Tx) error {
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE repository_sources RENAME TO repository_sources_split_schema_old;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE repository_sources (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		public_id TEXT NOT NULL UNIQUE,
-		name TEXT NOT NULL UNIQUE,
-		provider TEXT NOT NULL DEFAULT 'github',
-		repo_url TEXT NOT NULL,
-		deploy_key_cipher TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	);`); err != nil {
-		return err
-	}
-
-	rows, err := tx.QueryContext(ctx, `SELECT id, public_id, name, provider, repo_url, deploy_key_cipher, created_at, updated_at
-		FROM repository_sources_split_schema_old
-		ORDER BY id`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	usedNames := make(map[string]struct{})
-	for rows.Next() {
-		var (
-			id              int64
-			publicID        string
-			name            string
-			provider        string
-			repoURL         string
-			deployKeyCipher string
-			createdAt       string
-			updatedAt       string
-		)
-		if err := rows.Scan(&id, &publicID, &name, &provider, &repoURL, &deployKeyCipher, &createdAt, &updatedAt); err != nil {
-			return err
-		}
-		name = nextUniqueRepositorySourceName(name, usedNames)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO repository_sources
-			(id, public_id, name, provider, repo_url, deploy_key_cipher, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, publicID, name, provider, repoURL, deployKeyCipher, createdAt, updatedAt,
-		); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `DROP TABLE repository_sources_split_schema_old;`)
-	return err
-}
-
-func (s *Store) rebuildEnvironmentRepositoriesTable(ctx context.Context, tx *sql.Tx) error {
-	hasLegacyRepositoryIDColumn, err := s.txTableHasColumn(ctx, tx, "environment_repositories", "legacy_repository_id")
-	if err != nil {
-		return err
-	}
-	hasWebhookIDColumn, err := s.txTableHasColumn(ctx, tx, "environment_repositories", "webhook_id")
-	if err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS environment_repositories_environment_idx;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS environment_repositories_source_idx;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS environment_repositories_runner_idx;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE environment_repositories RENAME TO environment_repositories_split_schema_old;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE environment_repositories (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		public_id TEXT NOT NULL UNIQUE,
-		environment_id INTEGER NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-		repository_source_id INTEGER NOT NULL REFERENCES repository_sources(id) ON DELETE CASCADE,
-		legacy_repository_id INTEGER NULL UNIQUE,
-		webhook_secret_cipher TEXT NOT NULL,
-		webhook_id TEXT NOT NULL UNIQUE CHECK (webhook_id <> ''),
-		branch TEXT NOT NULL,
-		work_dir TEXT NOT NULL,
-		deploy_script TEXT NOT NULL,
-		runner_id INTEGER NULL REFERENCES runners(id) ON DELETE SET NULL,
-		clean_worktree INTEGER NOT NULL DEFAULT 1,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL,
-		UNIQUE(environment_id, repository_source_id)
-	);`); err != nil {
-		return err
-	}
-
-	legacyRepositoryIDExpr := `legacy_repository_id`
-	if !hasLegacyRepositoryIDColumn {
-		legacyRepositoryIDExpr = `NULL AS legacy_repository_id`
-	}
-	webhookIDExpr := `webhook_id`
-	if !hasWebhookIDColumn {
-		webhookIDExpr = `'' AS webhook_id`
-	}
-	query := fmt.Sprintf(`SELECT id, public_id, environment_id, repository_source_id, %s,
-		webhook_secret_cipher, %s, branch, work_dir, deploy_script, runner_id, clean_worktree, created_at, updated_at
-		FROM environment_repositories_split_schema_old
-		ORDER BY id`, legacyRepositoryIDExpr, webhookIDExpr)
-
-	rows, err := tx.QueryContext(ctx, query)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	usedWebhookIDs := make(map[string]struct{})
-	type environmentRepositoryRow struct {
-		ID                  int64
-		PublicID            string
-		EnvironmentID       int64
-		RepositorySourceID  int64
-		LegacyRepositoryID  sql.NullInt64
-		WebhookSecretCipher string
-		WebhookID           string
-		Branch              string
-		WorkDir             string
-		DeployScript        string
-		RunnerID            sql.NullInt64
-		CleanWorktree       int
-		CreatedAt           string
-		UpdatedAt           string
-	}
-
-	for rows.Next() {
-		var row environmentRepositoryRow
-		if err := rows.Scan(
-			&row.ID,
-			&row.PublicID,
-			&row.EnvironmentID,
-			&row.RepositorySourceID,
-			&row.LegacyRepositoryID,
-			&row.WebhookSecretCipher,
-			&row.WebhookID,
-			&row.Branch,
-			&row.WorkDir,
-			&row.DeployScript,
-			&row.RunnerID,
-			&row.CleanWorktree,
-			&row.CreatedAt,
-			&row.UpdatedAt,
-		); err != nil {
-			return err
-		}
-		legacyRepositoryID := row.LegacyRepositoryID
-		if !legacyRepositoryID.Valid {
-			legacyRepositoryID, err = s.recoverLegacyRepositoryID(
-				ctx,
-				tx,
-				row.RepositorySourceID,
-				row.WebhookSecretCipher,
-				row.Branch,
-				row.WorkDir,
-				row.DeployScript,
-				row.RunnerID,
-				row.CleanWorktree,
-			)
-			if err != nil {
-				return err
-			}
-		}
-		webhookID := strings.TrimSpace(row.WebhookID)
-		if webhookID == "" {
-			webhookID, err = s.newUniqueWebhookID(usedWebhookIDs)
-			if err != nil {
-				return err
-			}
-		} else {
-			if _, exists := usedWebhookIDs[webhookID]; exists {
-				webhookID, err = s.newUniqueWebhookID(usedWebhookIDs)
-				if err != nil {
-					return err
-				}
-			} else {
-				usedWebhookIDs[webhookID] = struct{}{}
-			}
-		}
-
-		if _, err := tx.ExecContext(ctx, `INSERT INTO environment_repositories
-			(id, public_id, environment_id, repository_source_id, legacy_repository_id, webhook_secret_cipher,
-			 webhook_id, branch, work_dir, deploy_script, runner_id, clean_worktree, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			row.ID, row.PublicID, row.EnvironmentID, row.RepositorySourceID, nullableSQLInt64(legacyRepositoryID),
-			row.WebhookSecretCipher, webhookID, row.Branch, row.WorkDir, row.DeployScript,
-			nullableSQLInt64(row.RunnerID), row.CleanWorktree, row.CreatedAt, row.UpdatedAt,
-		); err != nil {
-			return err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	if _, err := tx.ExecContext(ctx, `CREATE INDEX environment_repositories_environment_idx
-		ON environment_repositories(environment_id, id);`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE INDEX environment_repositories_source_idx
-		ON environment_repositories(repository_source_id, id);`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE INDEX environment_repositories_runner_idx
-		ON environment_repositories(runner_id, id);`); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `DROP TABLE environment_repositories_split_schema_old;`)
-	return err
-}
-
-func (s *Store) migrateRunnerTerminology(ctx context.Context) error {
-	agentsExists, err := s.tableExists(ctx, "agents")
-	if err != nil {
-		return err
-	}
-	repositoriesUseAgentID, err := s.tableHasColumn(ctx, "repositories", "agent_id")
-	if err != nil {
-		return err
-	}
-	deployJobsUseAgentID, err := s.tableHasColumn(ctx, "deploy_jobs", "agent_id")
-	if err != nil {
-		return err
-	}
-	if !agentsExists && !repositoriesUseAgentID && !deployJobsUseAgentID {
-		return nil
-	}
-
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF;`); err != nil {
-		return err
-	}
-	defer conn.ExecContext(context.Background(), `PRAGMA foreign_keys=ON;`)
-
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS runners (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT NOT NULL,
-		mode TEXT NOT NULL CHECK (mode IN ('local', 'ssh')),
-		host TEXT NOT NULL DEFAULT '',
-		port INTEGER NOT NULL DEFAULT 22,
-		username TEXT NOT NULL DEFAULT '',
-		work_root TEXT NOT NULL DEFAULT '',
-		private_key_cipher TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	);`); err != nil {
-		return err
-	}
-	if agentsExists {
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO runners
-			(id, name, mode, host, port, username, work_root, private_key_cipher, created_at, updated_at)
-			SELECT id, name, mode, host, port, username, work_root, private_key_cipher, created_at, updated_at
-			FROM agents;`); err != nil {
-			return err
-		}
-	}
-	if repositoriesUseAgentID {
-		if err := s.rebuildRepositoriesWithRunnerID(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if deployJobsUseAgentID {
-		if err := s.rebuildDeployJobsWithRunnerID(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if agentsExists {
-		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS agents;`); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func (s *Store) rebuildRepositoriesWithRunnerID(ctx context.Context, tx *sql.Tx) error {
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE repositories RENAME TO repositories_runner_migration_old;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE repositories (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT NOT NULL,
-		provider TEXT NOT NULL DEFAULT 'github',
-		repo_url TEXT NOT NULL,
-		webhook_secret_cipher TEXT NOT NULL,
-		branch TEXT NOT NULL,
-		work_dir TEXT NOT NULL,
-		deploy_key_cipher TEXT NOT NULL DEFAULT '',
-		deploy_script TEXT NOT NULL,
-		runner_id INTEGER NULL REFERENCES runners(id) ON DELETE SET NULL,
-		clean_worktree INTEGER NOT NULL DEFAULT 1,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	);`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO repositories
-		(id, name, provider, repo_url, webhook_secret_cipher, branch, work_dir,
-		 deploy_key_cipher, deploy_script, runner_id, clean_worktree, created_at, updated_at)
-		SELECT id, name, provider, repo_url, webhook_secret_cipher, branch, work_dir,
-		 deploy_key_cipher, deploy_script, agent_id, clean_worktree, created_at, updated_at
-		FROM repositories_runner_migration_old;`); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `DROP TABLE repositories_runner_migration_old;`)
-	return err
-}
-
-func (s *Store) rebuildDeployJobsWithRunnerID(ctx context.Context, tx *sql.Tx) error {
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS deploy_jobs_delivery_idx;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS deploy_jobs_status_idx;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS deploy_jobs_repository_idx;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE deploy_jobs RENAME TO deploy_jobs_runner_migration_old;`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE deploy_jobs (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		repository_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-		runner_id INTEGER NULL REFERENCES runners(id) ON DELETE SET NULL,
-		provider TEXT NOT NULL,
-		event TEXT NOT NULL,
-		delivery_id TEXT NOT NULL DEFAULT '',
-		branch TEXT NOT NULL,
-		commit_sha TEXT NOT NULL DEFAULT '',
-		commit_message TEXT NOT NULL DEFAULT '',
-		commit_author TEXT NOT NULL DEFAULT '',
-		status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'ignored')),
-		exit_code INTEGER NULL,
-		error TEXT NOT NULL DEFAULT '',
-		triggered_at TEXT NOT NULL,
-		started_at TEXT NULL,
-		finished_at TEXT NULL,
-		created_at TEXT NOT NULL
-	);`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_jobs
-		(id, repository_id, runner_id, provider, event, delivery_id, branch, commit_sha, commit_message, commit_author,
-		 status, exit_code, error, triggered_at, started_at, finished_at, created_at)
-		SELECT id, repository_id, agent_id, provider, event, delivery_id, branch, commit_sha, commit_message, commit_author,
-		 status, exit_code, error, triggered_at, started_at, finished_at, created_at
-		FROM deploy_jobs_runner_migration_old;`); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `DROP TABLE deploy_jobs_runner_migration_old;`)
-	return err
-}
-
-func (s *Store) tableExists(ctx context.Context, table string) (bool, error) {
-	var name string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
-		table,
-	).Scan(&name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-func (s *Store) tableHasColumn(ctx context.Context, table string, column string) (bool, error) {
-	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, sqliteIdentifier(table)))
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, pk int
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func (s *Store) txTableHasColumn(ctx context.Context, tx *sql.Tx, table string, column string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, sqliteIdentifier(table)))
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, pk int
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
-}
-
-func (s *Store) tableNeedsUniqueColumns(ctx context.Context, table string, columns ...string) (bool, error) {
-	indexRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA index_list(%s)`, sqliteIdentifier(table)))
-	if err != nil {
-		return false, err
-	}
-	defer indexRows.Close()
-
-	for indexRows.Next() {
-		var seq int
-		var indexName string
-		var unique int
-		var origin string
-		var partial int
-		if err := indexRows.Scan(&seq, &indexName, &unique, &origin, &partial); err != nil {
-			return false, err
-		}
-		if unique == 0 {
-			continue
-		}
-
-		indexInfoRows, err := s.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA index_info(%s)`, sqliteIdentifier(indexName)))
-		if err != nil {
-			return false, err
-		}
-
-		indexColumns := make([]string, 0)
-		for indexInfoRows.Next() {
-			var seqno, cid int
-			var name string
-			if err := indexInfoRows.Scan(&seqno, &cid, &name); err != nil {
-				indexInfoRows.Close()
-				return false, err
-			}
-			indexColumns = append(indexColumns, name)
-		}
-		if err := indexInfoRows.Err(); err != nil {
-			indexInfoRows.Close()
-			return false, err
-		}
-		indexInfoRows.Close()
-
-		if len(indexColumns) != len(columns) {
-			continue
-		}
-		match := true
-		for i := range columns {
-			if indexColumns[i] != columns[i] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return false, nil
-		}
-	}
-	if err := indexRows.Err(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *Store) loadUsedRepositorySourceNames(ctx context.Context, tx *sql.Tx) (map[string]struct{}, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM repository_sources`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	used := make(map[string]struct{})
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		used[name] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return used, nil
-}
-
-func (s *Store) tableHasBlankStringValue(ctx context.Context, table string, column string) (bool, error) {
-	var exists int
-	query := fmt.Sprintf(
-		`SELECT EXISTS(SELECT 1 FROM %s WHERE TRIM(COALESCE(%s, '')) = '')`,
-		sqliteIdentifier(table),
-		sqliteIdentifier(column),
-	)
-	if err := s.db.QueryRowContext(ctx, query).Scan(&exists); err != nil {
-		return false, err
-	}
-	return exists == 1, nil
-}
-
-func (s *Store) recoverLegacyRepositoryID(
-	ctx context.Context,
-	tx *sql.Tx,
-	repositorySourceID int64,
-	webhookSecretCipher string,
-	branch string,
-	workDir string,
-	deployScript string,
-	runnerID sql.NullInt64,
-	cleanWorktree int,
-) (sql.NullInt64, error) {
-	var legacyRepositoryID sql.NullInt64
-	err := tx.QueryRowContext(ctx,
-		`SELECT r.id
-		 FROM repositories r
-		 INNER JOIN repository_sources s ON s.id = ?
-		 WHERE r.provider = s.provider
-		   AND r.repo_url = s.repo_url
-		   AND r.deploy_key_cipher = s.deploy_key_cipher
-		   AND r.webhook_secret_cipher = ?
-		   AND r.branch = ?
-		   AND r.work_dir = ?
-		   AND r.deploy_script = ?
-		   AND COALESCE(r.runner_id, 0) = COALESCE(?, 0)
-		   AND r.clean_worktree = ?`,
-		repositorySourceID,
-		webhookSecretCipher,
-		branch,
-		workDir,
-		deployScript,
-		nullableSQLInt64(runnerID),
-		cleanWorktree,
-	).Scan(&legacyRepositoryID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return sql.NullInt64{}, nil
-	}
-	return legacyRepositoryID, err
-}
-
-func sqliteIdentifier(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func (s *Store) LoginBlocked(ctx context.Context, policies []LoginThrottle, now time.Time) (time.Time, bool, error) {
@@ -1213,26 +393,6 @@ func (s *Store) ensureAdminUser(ctx context.Context, username, password string, 
 	return err
 }
 
-func (s *Store) removeLegacyDefaultAdmin(ctx context.Context, configuredUsername string) error {
-	if strings.EqualFold(strings.TrimSpace(configuredUsername), "admin") {
-		return nil
-	}
-	var id int64
-	var passwordHash string
-	err := s.db.QueryRowContext(ctx, `SELECT id, password_hash FROM users WHERE username = ?`, "admin").Scan(&id, &passwordHash)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !VerifyPassword("admin123", passwordHash) {
-		return nil
-	}
-	_, err = s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
-	return err
-}
-
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var user User
 	var createdAt string
@@ -1351,7 +511,7 @@ func (s *Store) ListEnvironments(ctx context.Context) ([]Environment, error) {
 }
 
 func (s *Store) CreateEnvironment(ctx context.Context, env Environment) (Environment, error) {
-	publicID, err := newPublicID("env")
+	resourceID, err := newOpaqueID("env")
 	if err != nil {
 		return Environment{}, err
 	}
@@ -1360,12 +520,12 @@ func (s *Store) CreateEnvironment(ctx context.Context, env Environment) (Environ
 		`INSERT INTO environments
 		 (public_id, name, slug, description, color, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		publicID, strings.TrimSpace(env.Name), strings.TrimSpace(env.Slug), env.Description, env.Color, now, now,
+		resourceID, strings.TrimSpace(env.Name), strings.TrimSpace(env.Slug), env.Description, env.Color, now, now,
 	)
 	if err != nil {
 		return Environment{}, err
 	}
-	return s.getEnvironmentByPublicID(ctx, publicID)
+	return s.getEnvironmentByID(ctx, resourceID)
 }
 
 func (s *Store) ListRepositorySources(ctx context.Context) ([]RepositorySource, error) {
@@ -1391,7 +551,7 @@ func (s *Store) ListRepositorySources(ctx context.Context) ([]RepositorySource, 
 }
 
 func (s *Store) CreateRepositorySource(ctx context.Context, source RepositorySource) (RepositorySource, error) {
-	publicID, err := newPublicID("src")
+	resourceID, err := newOpaqueID("src")
 	if err != nil {
 		return RepositorySource{}, err
 	}
@@ -1404,24 +564,24 @@ func (s *Store) CreateRepositorySource(ctx context.Context, source RepositorySou
 		`INSERT INTO repository_sources
 		 (public_id, name, provider, repo_url, deploy_key_cipher, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		publicID, strings.TrimSpace(source.Name), normalizeProvider(source.Provider), source.RepoURL, deployKeyCipher, now, now,
+		resourceID, strings.TrimSpace(source.Name), normalizeProvider(source.Provider), source.RepoURL, deployKeyCipher, now, now,
 	)
 	if err != nil {
 		return RepositorySource{}, err
 	}
-	created, err := s.getRepositorySourceRecordByPublicID(ctx, publicID, false)
+	created, err := s.getRepositorySourceRecordByResourceID(ctx, resourceID, false)
 	if err != nil {
 		return RepositorySource{}, err
 	}
 	return created.RepositorySource, nil
 }
 
-func (s *Store) ListEnvironmentRepositories(ctx context.Context, environmentPublicID string) ([]EnvironmentRepository, error) {
+func (s *Store) ListEnvironmentRepositories(ctx context.Context, environmentID string) ([]EnvironmentRepository, error) {
 	query := environmentRepositorySelectSQL()
 	args := make([]any, 0, 1)
-	if strings.TrimSpace(environmentPublicID) != "" {
+	if strings.TrimSpace(environmentID) != "" {
 		query += ` WHERE e.public_id = ?`
-		args = append(args, strings.TrimSpace(environmentPublicID))
+		args = append(args, strings.TrimSpace(environmentID))
 	}
 	query += ` ORDER BY er.id DESC`
 
@@ -1443,11 +603,11 @@ func (s *Store) ListEnvironmentRepositories(ctx context.Context, environmentPubl
 }
 
 func (s *Store) CreateEnvironmentRepository(ctx context.Context, repo EnvironmentRepository) (EnvironmentRepository, error) {
-	environment, err := s.getEnvironmentByPublicID(ctx, repo.EnvironmentKey)
+	environment, err := s.getEnvironmentByID(ctx, repo.EnvironmentID)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
-	source, err := s.getRepositorySourceRecordByPublicID(ctx, repo.SourceKey, true)
+	source, err := s.getRepositorySourceRecordByResourceID(ctx, repo.RepositorySourceID, true)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
@@ -1463,11 +623,11 @@ func (s *Store) CreateEnvironmentRepository(ctx context.Context, repo Environmen
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
-	webhookID, err := newPublicID("wh")
+	webhookID, err := newOpaqueID("wh")
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
-	publicID, err := newPublicID("repo")
+	resourceID, err := newOpaqueID("repo")
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
@@ -1479,46 +639,20 @@ func (s *Store) CreateEnvironmentRepository(ctx context.Context, repo Environmen
 	defer tx.Rollback()
 
 	now := dbTime(time.Now())
-	legacyRepositoryResult, err := tx.ExecContext(ctx,
-		`INSERT INTO repositories
-		 (name, provider, repo_url, webhook_secret_cipher, branch, work_dir, deploy_key_cipher, deploy_script, runner_id, clean_worktree, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		source.Name,
-		source.Provider,
-		source.RepoURL,
-		webhookSecretCipher,
-		normalizeBranch(repo.Branch),
-		repo.WorkDir,
-		source.DeployKeyCipher,
-		repo.DeployScript,
-		nullableInt64(repo.RunnerID),
-		boolInt(repo.CleanWorktree),
-		now,
-		now,
-	)
-	if err != nil {
-		return EnvironmentRepository{}, err
-	}
-	legacyRepositoryID, err := legacyRepositoryResult.LastInsertId()
-	if err != nil {
-		return EnvironmentRepository{}, err
-	}
-
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO environment_repositories
-		 (public_id, environment_id, repository_source_id, legacy_repository_id, webhook_secret_cipher, webhook_id,
+		 (public_id, environment_id, repository_source_id, webhook_secret_cipher, webhook_id,
 		  branch, work_dir, deploy_script, runner_id, clean_worktree, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		publicID,
-		environment.ID,
-		source.ID,
-		legacyRepositoryID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		resourceID,
+		environment.InternalID,
+		source.InternalID,
 		webhookSecretCipher,
 		webhookID,
 		normalizeBranch(repo.Branch),
 		repo.WorkDir,
 		repo.DeployScript,
-		nullableInt64(repo.RunnerID),
+		nullableInt64(repo.RunnerInternalID),
 		boolInt(repo.CleanWorktree),
 		now,
 		now,
@@ -1530,7 +664,7 @@ func (s *Store) CreateEnvironmentRepository(ctx context.Context, repo Environmen
 		return EnvironmentRepository{}, err
 	}
 
-	created, err := s.getEnvironmentRepositoryRecordByPublicID(ctx, publicID, true)
+	created, err := s.getEnvironmentRepositoryRecordByResourceID(ctx, resourceID, true)
 	if err != nil {
 		return EnvironmentRepository{}, err
 	}
@@ -1545,127 +679,14 @@ func (s *Store) GetEnvironmentRepositoryByWebhookID(ctx context.Context, webhook
 	return repository.EnvironmentRepository, nil
 }
 
-func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT r.id, r.name, r.provider, r.repo_url, r.webhook_secret_cipher, r.branch, r.work_dir,
-		        r.deploy_key_cipher, r.deploy_script, r.runner_id, COALESCE(a.name, ''), r.clean_worktree,
-		        r.created_at, r.updated_at,
-		        COALESCE((SELECT status FROM deploy_jobs j WHERE j.repository_id = r.id ORDER BY j.id DESC LIMIT 1), ''),
-		        COALESCE((SELECT commit_sha FROM deploy_jobs j WHERE j.repository_id = r.id ORDER BY j.id DESC LIMIT 1), ''),
-		        COALESCE((SELECT finished_at FROM deploy_jobs j WHERE j.repository_id = r.id ORDER BY j.id DESC LIMIT 1), '')
-		 FROM repositories r
-		 LEFT JOIN runners a ON a.id = r.runner_id
-		 ORDER BY r.id DESC`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	repos := make([]Repository, 0)
-	for rows.Next() {
-		repo, err := s.scanRepository(rows, true)
-		if err != nil {
-			return nil, err
-		}
-		repos = append(repos, repo)
-	}
-	return repos, rows.Err()
-}
-
-func (s *Store) GetRepository(ctx context.Context, id int64, includeDeployKey bool) (Repository, error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT r.id, r.name, r.provider, r.repo_url, r.webhook_secret_cipher, r.branch, r.work_dir,
-		        r.deploy_key_cipher, r.deploy_script, r.runner_id, COALESCE(a.name, ''), r.clean_worktree,
-		        r.created_at, r.updated_at, '', '', ''
-		 FROM repositories r
-		 LEFT JOIN runners a ON a.id = r.runner_id
-		 WHERE r.id = ?`,
-		id,
-	)
-	return s.scanRepository(row, includeDeployKey)
-}
-
-func (s *Store) CreateRepository(ctx context.Context, repo Repository) (Repository, error) {
-	if strings.TrimSpace(repo.WebhookSecret) == "" {
-		secret, err := randomToken(32)
-		if err != nil {
-			return Repository{}, err
-		}
-		repo.WebhookSecret = secret
-	}
-	webhookCipher, err := s.box.Seal(repo.WebhookSecret)
-	if err != nil {
-		return Repository{}, err
-	}
-	deployKeyCipher, err := s.box.Seal(repo.DeployKey)
-	if err != nil {
-		return Repository{}, err
-	}
-	now := dbTime(time.Now())
-	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO repositories
-		 (name, provider, repo_url, webhook_secret_cipher, branch, work_dir, deploy_key_cipher, deploy_script, runner_id, clean_worktree, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		repo.Name, normalizeProvider(repo.Provider), repo.RepoURL, webhookCipher, normalizeBranch(repo.Branch),
-		repo.WorkDir, deployKeyCipher, repo.DeployScript, nullableInt64(repo.RunnerID), boolInt(repo.CleanWorktree), now, now,
-	)
-	if err != nil {
-		return Repository{}, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return Repository{}, err
-	}
-	return s.GetRepository(ctx, id, false)
-}
-
-func (s *Store) UpdateRepository(ctx context.Context, id int64, repo Repository) (Repository, error) {
-	existing, err := s.GetRepository(ctx, id, true)
-	if err != nil {
-		return Repository{}, err
-	}
-	webhookSecret := existing.WebhookSecret
-	if strings.TrimSpace(repo.WebhookSecret) != "" {
-		webhookSecret = repo.WebhookSecret
-	}
-	deployKey := existing.DeployKey
-	if strings.TrimSpace(repo.DeployKey) != "" {
-		deployKey = repo.DeployKey
-	}
-	webhookCipher, err := s.box.Seal(webhookSecret)
-	if err != nil {
-		return Repository{}, err
-	}
-	deployKeyCipher, err := s.box.Seal(deployKey)
-	if err != nil {
-		return Repository{}, err
-	}
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE repositories
-		 SET name = ?, provider = ?, repo_url = ?, webhook_secret_cipher = ?, branch = ?, work_dir = ?,
-		     deploy_key_cipher = ?, deploy_script = ?, runner_id = ?, clean_worktree = ?, updated_at = ?
-		 WHERE id = ?`,
-		repo.Name, normalizeProvider(repo.Provider), repo.RepoURL, webhookCipher, normalizeBranch(repo.Branch),
-		repo.WorkDir, deployKeyCipher, repo.DeployScript, nullableInt64(repo.RunnerID), boolInt(repo.CleanWorktree), dbTime(time.Now()), id,
-	)
-	if err != nil {
-		return Repository{}, err
-	}
-	return s.GetRepository(ctx, id, false)
-}
-
-func (s *Store) DeleteRepository(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, id)
-	return err
-}
-
 func (s *Store) ListSecrets(ctx context.Context) ([]Secret, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT s.id, s.name, s.value_cipher, s.repository_id, COALESCE(r.name, ''), s.created_at, s.updated_at
+		`SELECT s.id, s.name, s.value_cipher, s.environment_id, s.environment_repository_id,
+		        COALESCE(er.public_id, ''), COALESCE(src.name, ''), s.created_at, s.updated_at
 		 FROM secrets s
-		 LEFT JOIN repositories r ON r.id = s.repository_id
-		 ORDER BY s.repository_id IS NOT NULL, COALESCE(r.name, ''), s.name`,
+		 LEFT JOIN environment_repositories er ON er.id = s.environment_repository_id
+		 LEFT JOIN repository_sources src ON src.id = er.repository_source_id
+		 ORDER BY s.environment_repository_id IS NOT NULL, COALESCE(src.name, ''), s.name`,
 	)
 	if err != nil {
 		return nil, err
@@ -1685,9 +706,11 @@ func (s *Store) ListSecrets(ctx context.Context) ([]Secret, error) {
 
 func (s *Store) GetSecret(ctx context.Context, id int64, includeValue bool) (Secret, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT s.id, s.name, s.value_cipher, s.repository_id, COALESCE(r.name, ''), s.created_at, s.updated_at
+		`SELECT s.id, s.name, s.value_cipher, s.environment_id, s.environment_repository_id,
+		        COALESCE(er.public_id, ''), COALESCE(src.name, ''), s.created_at, s.updated_at
 		 FROM secrets s
-		 LEFT JOIN repositories r ON r.id = s.repository_id
+		 LEFT JOIN environment_repositories er ON er.id = s.environment_repository_id
+		 LEFT JOIN repository_sources src ON src.id = er.repository_source_id
 		 WHERE s.id = ?`,
 		id,
 	)
@@ -1701,9 +724,9 @@ func (s *Store) CreateSecret(ctx context.Context, secret Secret) (Secret, error)
 	}
 	now := dbTime(time.Now())
 	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO secrets (name, value_cipher, repository_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		normalizeSecretName(secret.Name), cipherText, nullableInt64(secret.RepositoryID), now, now,
+		`INSERT INTO secrets (name, value_cipher, environment_id, environment_repository_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		normalizeSecretName(secret.Name), cipherText, secret.EnvironmentID, nullableInt64(secret.EnvironmentRepositoryID), now, now,
 	)
 	if err != nil {
 		return Secret{}, err
@@ -1730,9 +753,9 @@ func (s *Store) UpdateSecret(ctx context.Context, id int64, secret Secret) (Secr
 	}
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE secrets
-		 SET name = ?, value_cipher = ?, repository_id = ?, updated_at = ?
+		 SET name = ?, value_cipher = ?, environment_id = ?, environment_repository_id = ?, updated_at = ?
 		 WHERE id = ?`,
-		normalizeSecretName(secret.Name), cipherText, nullableInt64(secret.RepositoryID), dbTime(time.Now()), id,
+		normalizeSecretName(secret.Name), cipherText, secret.EnvironmentID, nullableInt64(secret.EnvironmentRepositoryID), dbTime(time.Now()), id,
 	)
 	if err != nil {
 		return Secret{}, err
@@ -1745,22 +768,23 @@ func (s *Store) DeleteSecret(ctx context.Context, id int64) error {
 	return err
 }
 
-func (s *Store) DeploymentSecrets(ctx context.Context, repositoryPublicID string) ([]Secret, error) {
-	repository, err := s.getEnvironmentRepositoryRecordByPublicID(ctx, repositoryPublicID, false)
+func (s *Store) DeploymentSecrets(ctx context.Context, repositoryID string) ([]Secret, error) {
+	repository, err := s.getEnvironmentRepositoryRecordByResourceID(ctx, repositoryID, false)
 	if err != nil {
 		return nil, err
 	}
-	if !repository.LegacyRepositoryID.Valid {
-		return nil, fmt.Errorf("environment repository %s is missing legacy repository binding", repositoryPublicID)
-	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT s.id, s.name, s.value_cipher, s.repository_id, COALESCE(r.name, ''), s.created_at, s.updated_at
+		`SELECT s.id, s.name, s.value_cipher, s.environment_id, s.environment_repository_id,
+		        COALESCE(er.public_id, ''), COALESCE(src.name, ''), s.created_at, s.updated_at
 		 FROM secrets s
-		 LEFT JOIN repositories r ON r.id = s.repository_id
-		 WHERE s.repository_id IS NULL OR s.repository_id = ?
-		 ORDER BY s.repository_id IS NOT NULL`,
-		repository.LegacyRepositoryID.Int64,
+		 LEFT JOIN environment_repositories er ON er.id = s.environment_repository_id
+		 LEFT JOIN repository_sources src ON src.id = er.repository_source_id
+		 WHERE s.environment_id = ?
+		   AND (s.environment_repository_id IS NULL OR s.environment_repository_id = ?)
+		 ORDER BY s.environment_repository_id IS NOT NULL`,
+		repository.EnvironmentInternalID,
+		repository.InternalID,
 	)
 	if err != nil {
 		return nil, err
@@ -1802,15 +826,15 @@ func (s *Store) CreateJob(ctx context.Context, job DeployJob) (DeployJob, error)
 	}
 	result, err := s.db.ExecContext(ctx,
 		`INSERT INTO deploy_jobs
-		 (repository_id, runner_id, provider, event, delivery_id, branch, commit_sha, commit_message, commit_author,
+		 (environment_repository_id, runner_id, provider, event, delivery_id, branch, commit_sha, commit_message, commit_author,
 		  status, triggered_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.RepositoryID, nullableInt64(job.RunnerID), job.Provider, job.Event, job.DeliveryID, job.Branch,
+		job.EnvironmentRepositoryID, nullableInt64(job.RunnerID), job.Provider, job.Event, job.DeliveryID, job.Branch,
 		job.CommitSHA, job.CommitMessage, job.CommitAuthor, job.Status, dbTime(job.TriggeredAt), dbTime(job.CreatedAt),
 	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") && job.DeliveryID != "" {
-			existing, lookupErr := s.GetJobByDelivery(ctx, job.RepositoryID, job.DeliveryID)
+			existing, lookupErr := s.GetJobByDelivery(ctx, job.EnvironmentRepositoryID, job.DeliveryID)
 			if lookupErr == nil {
 				return existing, ErrDuplicateDelivery
 			}
@@ -1824,8 +848,8 @@ func (s *Store) CreateJob(ctx context.Context, job DeployJob) (DeployJob, error)
 	return s.GetJob(ctx, id)
 }
 
-func (s *Store) GetJobByDelivery(ctx context.Context, repositoryID int64, deliveryID string) (DeployJob, error) {
-	row := s.db.QueryRowContext(ctx, jobSelectSQL()+` WHERE j.repository_id = ? AND j.delivery_id = ?`, repositoryID, deliveryID)
+func (s *Store) GetJobByDelivery(ctx context.Context, environmentRepositoryID int64, deliveryID string) (DeployJob, error) {
+	row := s.db.QueryRowContext(ctx, jobSelectSQL()+` WHERE j.environment_repository_id = ? AND j.delivery_id = ?`, environmentRepositoryID, deliveryID)
 	return s.scanJob(row)
 }
 
@@ -1834,12 +858,12 @@ func (s *Store) GetJob(ctx context.Context, id int64) (DeployJob, error) {
 	return s.scanJob(row)
 }
 
-func (s *Store) ListJobs(ctx context.Context, repositoryID int64) ([]DeployJob, error) {
+func (s *Store) ListJobs(ctx context.Context, environmentRepositoryID int64) ([]DeployJob, error) {
 	query := jobSelectSQL()
 	var args []any
-	if repositoryID > 0 {
-		query += ` WHERE j.repository_id = ?`
-		args = append(args, repositoryID)
+	if environmentRepositoryID > 0 {
+		query += ` WHERE j.environment_repository_id = ?`
+		args = append(args, environmentRepositoryID)
 	}
 	query += ` ORDER BY j.id DESC LIMIT 200`
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -1941,30 +965,29 @@ type repositorySourceRecord struct {
 type environmentRepositoryRecord struct {
 	EnvironmentRepository
 	WebhookSecretCipher string
-	LegacyRepositoryID  sql.NullInt64
 }
 
-func (s *Store) getEnvironmentByPublicID(ctx context.Context, publicID string) (Environment, error) {
+func (s *Store) getEnvironmentByID(ctx context.Context, resourceID string) (Environment, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, public_id, name, slug, description, color, created_at, updated_at
 		 FROM environments
 		 WHERE public_id = ?`,
-		strings.TrimSpace(publicID),
+		strings.TrimSpace(resourceID),
 	)
 	return s.scanEnvironment(row)
 }
 
-func (s *Store) getRepositorySourceRecordByPublicID(ctx context.Context, publicID string, includeDeployKey bool) (repositorySourceRecord, error) {
+func (s *Store) getRepositorySourceRecordByResourceID(ctx context.Context, resourceID string, includeDeployKey bool) (repositorySourceRecord, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, public_id, name, provider, repo_url, deploy_key_cipher, created_at, updated_at
 		 FROM repository_sources
 		 WHERE public_id = ?`,
-		strings.TrimSpace(publicID),
+		strings.TrimSpace(resourceID),
 	)
 	return s.scanRepositorySource(row, includeDeployKey)
 }
 
-func (s *Store) getRepositorySourceRecordByID(ctx context.Context, id int64, includeDeployKey bool) (repositorySourceRecord, error) {
+func (s *Store) getRepositorySourceRecordByInternalID(ctx context.Context, id int64, includeDeployKey bool) (repositorySourceRecord, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, public_id, name, provider, repo_url, deploy_key_cipher, created_at, updated_at
 		 FROM repository_sources
@@ -1974,10 +997,10 @@ func (s *Store) getRepositorySourceRecordByID(ctx context.Context, id int64, inc
 	return s.scanRepositorySource(row, includeDeployKey)
 }
 
-func (s *Store) getEnvironmentRepositoryRecordByPublicID(ctx context.Context, publicID string, includeSensitive bool) (environmentRepositoryRecord, error) {
+func (s *Store) getEnvironmentRepositoryRecordByResourceID(ctx context.Context, resourceID string, includeSensitive bool) (environmentRepositoryRecord, error) {
 	row := s.db.QueryRowContext(ctx,
 		environmentRepositorySelectSQL()+` WHERE er.public_id = ?`,
-		strings.TrimSpace(publicID),
+		strings.TrimSpace(resourceID),
 	)
 	return s.scanEnvironmentRepository(row, includeSensitive)
 }
@@ -1990,10 +1013,10 @@ func (s *Store) getEnvironmentRepositoryRecordByWebhookID(ctx context.Context, w
 	return s.scanEnvironmentRepository(row, includeSensitive)
 }
 
-func (s *Store) getEnvironmentRepositoryRecordByLegacyRepositoryID(ctx context.Context, legacyRepositoryID int64, includeSensitive bool) (environmentRepositoryRecord, error) {
+func (s *Store) getEnvironmentRepositoryRecordByInternalID(ctx context.Context, id int64, includeSensitive bool) (environmentRepositoryRecord, error) {
 	row := s.db.QueryRowContext(ctx,
-		environmentRepositorySelectSQL()+` WHERE er.legacy_repository_id = ?`,
-		legacyRepositoryID,
+		environmentRepositorySelectSQL()+` WHERE er.id = ?`,
+		id,
 	)
 	return s.scanEnvironmentRepository(row, includeSensitive)
 }
@@ -2003,7 +1026,7 @@ func environmentRepositorySelectSQL() string {
 		er.repository_source_id, s.public_id, s.name, s.provider, s.repo_url,
 		er.webhook_secret_cipher, er.webhook_id, er.branch, er.work_dir, er.deploy_script,
 		er.runner_id, COALESCE(a.name, ''), er.clean_worktree, s.deploy_key_cipher,
-		er.created_at, er.updated_at, er.legacy_repository_id
+		er.created_at, er.updated_at
 		FROM environment_repositories er
 		INNER JOIN environments e ON e.id = er.environment_id
 		INNER JOIN repository_sources s ON s.id = er.repository_source_id
@@ -2014,8 +1037,8 @@ func (s *Store) scanEnvironment(row scanner) (Environment, error) {
 	var environment Environment
 	var createdAt, updatedAt string
 	if err := row.Scan(
+		&environment.InternalID,
 		&environment.ID,
-		&environment.PublicID,
 		&environment.Name,
 		&environment.Slug,
 		&environment.Description,
@@ -2034,8 +1057,8 @@ func (s *Store) scanRepositorySource(row scanner, includeDeployKey bool) (reposi
 	var source repositorySourceRecord
 	var createdAt, updatedAt string
 	if err := row.Scan(
+		&source.InternalID,
 		&source.ID,
-		&source.PublicID,
 		&source.Name,
 		&source.Provider,
 		&source.RepoURL,
@@ -2065,13 +1088,13 @@ func (s *Store) scanEnvironmentRepository(row scanner, includeSensitive bool) (e
 	var clean int
 	var createdAt, updatedAt string
 	if err := row.Scan(
+		&repository.InternalID,
 		&repository.ID,
-		&repository.PublicID,
+		&repository.EnvironmentInternalID,
 		&repository.EnvironmentID,
-		&repository.EnvironmentKey,
 		&repository.EnvironmentName,
+		&repository.RepositorySourceInternalID,
 		&repository.RepositorySourceID,
-		&repository.SourceKey,
 		&repository.Name,
 		&repository.Provider,
 		&repository.RepoURL,
@@ -2086,13 +1109,12 @@ func (s *Store) scanEnvironmentRepository(row scanner, includeSensitive bool) (e
 		&deployKeyCipher,
 		&createdAt,
 		&updatedAt,
-		&repository.LegacyRepositoryID,
 	); err != nil {
 		return repository, err
 	}
 	if runnerID.Valid {
-		repository.RunnerID = &runnerID.Int64
-		repository.RunnerKey = strconv.FormatInt(runnerID.Int64, 10)
+		repository.RunnerInternalID = &runnerID.Int64
+		repository.RunnerID = strconv.FormatInt(runnerID.Int64, 10)
 	}
 	repository.HasDeployKey = deployKeyCipher != ""
 	repository.CleanWorktree = clean != 0
@@ -2149,50 +1171,25 @@ func sanitizeLogLine(line string) string {
 	}, line)
 }
 
-func (s *Store) scanRepository(row scanner, includeDeployKey bool) (Repository, error) {
-	var repo Repository
-	var webhookCipher, deployKeyCipher, createdAt, updatedAt string
-	var runnerID sql.NullInt64
-	var clean int
-	if err := row.Scan(
-		&repo.ID, &repo.Name, &repo.Provider, &repo.RepoURL, &webhookCipher, &repo.Branch, &repo.WorkDir,
-		&deployKeyCipher, &repo.DeployScript, &runnerID, &repo.RunnerName, &clean, &createdAt, &updatedAt,
-		&repo.LastJobStatus, &repo.LastJobCommit, &repo.LastJobFinished,
-	); err != nil {
-		return repo, err
-	}
-	if runnerID.Valid {
-		repo.RunnerID = &runnerID.Int64
-	}
-	secret, err := s.box.Open(webhookCipher)
-	if err != nil {
-		return repo, err
-	}
-	repo.WebhookSecret = secret
-	repo.WebhookURL = fmt.Sprintf("%s/webhooks/%d", s.publicURL, repo.ID)
-	repo.HasDeployKey = deployKeyCipher != ""
-	repo.CleanWorktree = clean != 0
-	if includeDeployKey {
-		deployKey, err := s.box.Open(deployKeyCipher)
-		if err != nil {
-			return repo, err
-		}
-		repo.DeployKey = deployKey
-	}
-	repo.CreatedAt = parseDBTime(createdAt)
-	repo.UpdatedAt = parseDBTime(updatedAt)
-	return repo, nil
-}
-
 func (s *Store) scanSecret(row scanner, includeValue bool) (Secret, error) {
 	var secret Secret
 	var valueCipher, createdAt, updatedAt string
-	var repositoryID sql.NullInt64
-	if err := row.Scan(&secret.ID, &secret.Name, &valueCipher, &repositoryID, &secret.Repository, &createdAt, &updatedAt); err != nil {
+	var environmentRepositoryID sql.NullInt64
+	if err := row.Scan(
+		&secret.ID,
+		&secret.Name,
+		&valueCipher,
+		&secret.EnvironmentID,
+		&environmentRepositoryID,
+		&secret.RepositoryID,
+		&secret.Repository,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
 		return secret, err
 	}
-	if repositoryID.Valid {
-		secret.RepositoryID = &repositoryID.Int64
+	if environmentRepositoryID.Valid {
+		secret.EnvironmentRepositoryID = &environmentRepositoryID.Int64
 	}
 	value, err := s.box.Open(valueCipher)
 	if err != nil {
@@ -2213,7 +1210,7 @@ func (s *Store) scanJob(row scanner) (DeployJob, error) {
 	var exitCode sql.NullInt64
 	var triggeredAt, startedAt, finishedAt, createdAt sql.NullString
 	if err := row.Scan(
-		&job.ID, &job.RepositoryID, &job.RepositoryName, &runnerID, &job.RunnerName, &job.Provider,
+		&job.ID, &job.EnvironmentRepositoryID, &job.RepositoryID, &job.RepositoryName, &runnerID, &job.RunnerName, &job.Provider,
 		&job.Event, &job.DeliveryID, &job.Branch, &job.CommitSHA, &job.CommitMessage, &job.CommitAuthor,
 		&job.Status, &exitCode, &job.Error, &triggeredAt, &startedAt, &finishedAt, &createdAt,
 	); err != nil {
@@ -2240,11 +1237,12 @@ func (s *Store) scanJob(row scanner) (DeployJob, error) {
 }
 
 func jobSelectSQL() string {
-	return `SELECT j.id, j.repository_id, r.name, j.runner_id, COALESCE(a.name, ''), j.provider,
+	return `SELECT j.id, j.environment_repository_id, er.public_id, src.name, j.runner_id, COALESCE(a.name, ''), j.provider,
 		j.event, j.delivery_id, j.branch, j.commit_sha, j.commit_message, j.commit_author,
 		j.status, j.exit_code, j.error, j.triggered_at, j.started_at, j.finished_at, j.created_at
 		FROM deploy_jobs j
-		INNER JOIN repositories r ON r.id = j.repository_id
+		INNER JOIN environment_repositories er ON er.id = j.environment_repository_id
+		INNER JOIN repository_sources src ON src.id = er.repository_source_id
 		LEFT JOIN runners a ON a.id = j.runner_id`
 }
 
@@ -2319,7 +1317,7 @@ func defaultPort(port int) int {
 
 func (s *Store) newUniqueWebhookID(used map[string]struct{}) (string, error) {
 	for {
-		webhookID, err := newPublicID("wh")
+		webhookID, err := newOpaqueID("wh")
 		if err != nil {
 			return "", err
 		}

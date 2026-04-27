@@ -81,16 +81,16 @@ func (d *Deployer) worker(ctx context.Context, workerID int) {
 }
 
 func (d *Deployer) RunJob(ctx context.Context, job DeployJob) (*int, error) {
-	environmentRepository, err := d.app.store.getEnvironmentRepositoryRecordByLegacyRepositoryID(ctx, job.RepositoryID, true)
+	environmentRepository, err := d.app.store.getEnvironmentRepositoryRecordByInternalID(ctx, job.EnvironmentRepositoryID, true)
 	if err != nil {
 		return nil, err
 	}
-	source, err := d.app.store.getRepositorySourceRecordByID(ctx, environmentRepository.RepositorySourceID, true)
+	source, err := d.app.store.getRepositorySourceRecordByInternalID(ctx, environmentRepository.RepositorySourceInternalID, true)
 	if err != nil {
 		return nil, err
 	}
 	repo := Repository{
-		ID:            job.RepositoryID,
+		ID:            job.EnvironmentRepositoryID,
 		Name:          environmentRepository.Name,
 		Provider:      source.Provider,
 		RepoURL:       source.RepoURL,
@@ -99,12 +99,12 @@ func (d *Deployer) RunJob(ctx context.Context, job DeployJob) (*int, error) {
 		DeployKey:     source.DeployKey,
 		HasDeployKey:  source.HasDeployKey,
 		DeployScript:  environmentRepository.DeployScript,
-		RunnerID:      environmentRepository.RunnerID,
+		RunnerID:      environmentRepository.RunnerInternalID,
 		CleanWorktree: environmentRepository.CleanWorktree,
 	}
 	runner := Runner{Name: "local", Mode: "local"}
-	if environmentRepository.RunnerID != nil {
-		runner, err = d.app.store.GetRunner(ctx, *environmentRepository.RunnerID, true)
+	if environmentRepository.RunnerInternalID != nil {
+		runner, err = d.app.store.GetRunner(ctx, *environmentRepository.RunnerInternalID, true)
 		if err != nil {
 			return nil, err
 		}
@@ -134,13 +134,13 @@ func (d *Deployer) RunJob(ctx context.Context, job DeployJob) (*int, error) {
 	}
 
 	if normalizeRunnerMode(runner.Mode) == "ssh" {
-		if err := d.deploySSH(ctx, repo, runner, environmentRepository.PublicID, checkoutPath, job, logLine); err != nil {
+		if err := d.deploySSH(ctx, repo, runner, environmentRepository.ID, checkoutPath, job, logLine); err != nil {
 			return commandExitCode(err), err
 		}
 		return intPtr(0), nil
 	}
 
-	if err := d.runLocalScript(ctx, repo, environmentRepository.PublicID, checkoutPath, job, logLine); err != nil {
+	if err := d.runLocalScript(ctx, repo, environmentRepository.ID, checkoutPath, job, logLine); err != nil {
 		return commandExitCode(err), err
 	}
 	return intPtr(0), nil
@@ -217,9 +217,9 @@ func (d *Deployer) checkout(ctx context.Context, repo Repository, runner Runner,
 	return checkoutPath, cleanup, nil
 }
 
-func (d *Deployer) runLocalScript(ctx context.Context, repo Repository, repositoryPublicID string, checkoutPath string, job DeployJob, logLine func(string, string)) error {
+func (d *Deployer) runLocalScript(ctx context.Context, repo Repository, repositoryID string, checkoutPath string, job DeployJob, logLine func(string, string)) error {
 	logLine("system", "running deployment script locally")
-	env, err := d.deploymentEnv(ctx, repo, repositoryPublicID, job)
+	env, err := d.deploymentEnv(ctx, repo, repositoryID, job)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (d *Deployer) runLocalScript(ctx context.Context, repo Repository, reposito
 	return err
 }
 
-func (d *Deployer) deploySSH(ctx context.Context, repo Repository, runner Runner, repositoryPublicID string, checkoutPath string, job DeployJob, logLine func(string, string)) error {
+func (d *Deployer) deploySSH(ctx context.Context, repo Repository, runner Runner, repositoryID string, checkoutPath string, job DeployJob, logLine func(string, string)) error {
 	keyPath, cleanup, err := writeTempKey(runner.PrivateKey)
 	if err != nil {
 		return err
@@ -247,7 +247,7 @@ func (d *Deployer) deploySSH(ctx context.Context, repo Repository, runner Runner
 	}
 
 	logLine("system", "running deployment script on SSH Runner")
-	env, err := d.deploymentEnv(ctx, repo, repositoryPublicID, job)
+	env, err := d.deploymentEnv(ctx, repo, repositoryID, job)
 	if err != nil {
 		return err
 	}
@@ -258,16 +258,16 @@ func (d *Deployer) deploySSH(ctx context.Context, repo Repository, runner Runner
 	return nil
 }
 
-func (d *Deployer) deploymentEnv(ctx context.Context, repo Repository, repositoryPublicID string, job DeployJob) ([]string, error) {
+func (d *Deployer) deploymentEnv(ctx context.Context, repo Repository, repositoryID string, job DeployJob) ([]string, error) {
 	env := []string{
-		"CANDY_REPOSITORY_ID=" + strconv.FormatInt(repo.ID, 10),
+		"CANDY_REPOSITORY_ID=" + repositoryID,
 		"CANDY_REPOSITORY_NAME=" + repo.Name,
 		"CANDY_REPOSITORY_URL=" + repo.RepoURL,
 		"CANDY_BRANCH=" + repo.Branch,
 		"CANDY_COMMIT_SHA=" + job.CommitSHA,
 		"CANDY_JOB_ID=" + strconv.FormatInt(job.ID, 10),
 	}
-	secrets, err := d.app.store.DeploymentSecrets(ctx, repositoryPublicID)
+	secrets, err := d.app.store.DeploymentSecrets(ctx, repositoryID)
 	if err != nil {
 		return nil, err
 	}

@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-const publicIDAlphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+const resourceIDAlphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
 
-func newPublicID(prefix string) (string, error) {
+func newOpaqueID(prefix string) (string, error) {
 	const opaqueLength = 20
 
 	buf := make([]byte, opaqueLength)
@@ -25,7 +25,7 @@ func newPublicID(prefix string) (string, error) {
 	}
 
 	for _, value := range buf {
-		b.WriteByte(publicIDAlphabet[int(value)%len(publicIDAlphabet)])
+		b.WriteByte(resourceIDAlphabet[int(value)%len(resourceIDAlphabet)])
 	}
 
 	return b.String(), nil

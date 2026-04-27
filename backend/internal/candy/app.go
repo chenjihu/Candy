@@ -125,7 +125,7 @@ func pathID(r *http.Request) (int64, error) {
 	return id, nil
 }
 
-func pathPublicID(r *http.Request) (string, error) {
+func pathResourceID(r *http.Request) (string, error) {
 	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
 		return "", errors.New("invalid id")
