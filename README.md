@@ -29,6 +29,7 @@ Terminology: this document uses Runner for the deployment execution endpoint. Wh
 - Repository source reuse: keep one shared Git source and deployment key, then bind different branches and scripts per environment.
 - GitHub `X-Hub-Signature-256` verification.
 - Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` signature verification.
+- GitLab `X-Gitlab-Token` verification.
 - Delivery deduplication, ignore non-target branches, and async job queueing.
 - Central service clone/fetch and checkout to the commit referenced by the webhook.
 - Local Runner: run `bash -lc` in the work directory.
@@ -198,6 +199,7 @@ After creating an environment repository binding in the admin console, copy the 
 
 - GitHub: set the Webhook URL to `https://your-host/webhooks/{webhookId}`, choose `application/json` as the content type, set the secret generated or configured in the console, and select the push event.
 - Gitee: use the same URL, set the secret in the console, select the push event, and prefer Gitee's signature secret verification mode.
+- GitLab: set the Webhook URL to `https://your-host/webhooks/{webhookId}`, set the Secret Token to the value shown in Candy, and enable the Push events trigger.
 
 Only when the payload branch matches the repository's trigger branch will the job be queued.
 

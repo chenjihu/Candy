@@ -1249,7 +1249,7 @@ func jobSelectSQL() string {
 func normalizeProvider(provider string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	switch provider {
-	case "gitee", "generic":
+	case "gitee", "gitlab", "generic":
 		return provider
 	default:
 		return "github"

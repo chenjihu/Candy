@@ -1,6 +1,7 @@
 package candy
 
 import (
+	"bytes"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
@@ -52,5 +53,85 @@ func TestCommitFallbacks(t *testing.T) {
 	}
 	if got := commitSHA(payload); got != "after-sha" {
 		t.Fatalf("commitSHA() = %q", got)
+	}
+}
+
+func TestGitLabPushWebhookQueuesDeployment(t *testing.T) {
+	app := newTestApp(t)
+	ctx := t.Context()
+
+	env, err := mustEnvironmentBySlug(ctx, app.store, "production")
+	if err != nil {
+		t.Fatalf("mustEnvironmentBySlug() error = %v", err)
+	}
+	source, err := app.store.CreateRepositorySource(ctx, RepositorySource{
+		Name:      "gitlab-source",
+		Provider:  "gitlab",
+		RepoURL:   "git@gitlab.com:team/app.git",
+		DeployKey: "PRIVATE KEY",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepositorySource() error = %v", err)
+	}
+	repo, err := app.store.CreateEnvironmentRepository(ctx, EnvironmentRepository{
+		EnvironmentID:      env.ID,
+		RepositorySourceID: source.ID,
+		Branch:             "main",
+		WorkDir:            "/srv/app",
+		DeployScript:       "echo deploy",
+		WebhookSecret:      "gitlab-secret",
+		CleanWorktree:      true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEnvironmentRepository() error = %v", err)
+	}
+
+	body := []byte(`{
+		"ref":"refs/heads/main",
+		"after":"0123456789abcdef0123456789abcdef01234567",
+		"user_name":"alice",
+		"commits":[{"id":"0123456789abcdef0123456789abcdef01234567","message":"ship it","author":{"name":"alice"}}]
+	}`)
+	req := httptest.NewRequest("POST", "/webhooks/"+repo.WebhookID, bytes.NewReader(body))
+	req.SetPathValue("id", repo.WebhookID)
+	req.Header.Set("X-Gitlab-Event", "Push Hook")
+	req.Header.Set("X-Gitlab-Token", "gitlab-secret")
+	req.Header.Set("X-Request-Id", "gitlab-delivery-1")
+
+	rec := httptest.NewRecorder()
+	app.handleWebhook(rec, req)
+
+	if rec.Code != 202 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	jobs, err := app.store.ListJobs(ctx, repo.InternalID)
+	if err != nil {
+		t.Fatalf("ListJobs() error = %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("jobs len = %d, want 1", len(jobs))
+	}
+	if jobs[0].Provider != "gitlab" {
+		t.Fatalf("provider = %q, want gitlab", jobs[0].Provider)
+	}
+	if jobs[0].DeliveryID != "gitlab-delivery-1" {
+		t.Fatalf("delivery = %q, want gitlab-delivery-1", jobs[0].DeliveryID)
+	}
+}
+
+func TestGitLabWebhookRejectsMissingToken(t *testing.T) {
+	req := httptest.NewRequest("POST", "/webhooks/wh_test", nil)
+	req.Header.Set("X-Gitlab-Event", "Push Hook")
+	if err := verifyGitLabToken("gitlab-secret", req); err == nil {
+		t.Fatal("expected missing token to fail")
+	}
+}
+
+func TestGitLabWebhookRejectsInvalidToken(t *testing.T) {
+	req := httptest.NewRequest("POST", "/webhooks/wh_test", nil)
+	req.Header.Set("X-Gitlab-Event", "Push Hook")
+	req.Header.Set("X-Gitlab-Token", "wrong")
+	if err := verifyGitLabToken("gitlab-secret", req); err == nil {
+		t.Fatal("expected invalid token to fail")
 	}
 }

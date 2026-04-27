@@ -122,6 +122,9 @@ func detectProvider(r *http.Request) string {
 	if r.Header.Get("X-Gitee-Event") != "" || r.Header.Get("X-Gitee-Token") != "" {
 		return "gitee"
 	}
+	if r.Header.Get("X-Gitlab-Event") != "" || r.Header.Get("X-Gitlab-Token") != "" {
+		return "gitlab"
+	}
 	return "github"
 }
 
@@ -132,13 +135,15 @@ func webhookEvent(provider string, r *http.Request, payload pushPayload) string 
 			return event
 		}
 		return payload.HookName
+	case "gitlab":
+		return r.Header.Get("X-Gitlab-Event")
 	default:
 		return r.Header.Get("X-GitHub-Event")
 	}
 }
 
 func webhookDeliveryID(provider string, repositoryID int64, r *http.Request, body []byte) string {
-	for _, header := range []string{"X-GitHub-Delivery", "X-Gitee-Delivery", "X-Gitee-Event-ID"} {
+	for _, header := range []string{"X-GitHub-Delivery", "X-Gitee-Delivery", "X-Gitee-Event-ID", "X-Request-Id"} {
 		if value := r.Header.Get(header); value != "" {
 			return value
 		}
@@ -154,6 +159,8 @@ func verifyWebhookSignature(provider, secret string, r *http.Request, body []byt
 	switch provider {
 	case "gitee":
 		return verifyGiteeSignature(secret, r)
+	case "gitlab":
+		return verifyGitLabToken(secret, r)
 	default:
 		return verifyGitHubSignature(secret, r, body)
 	}
@@ -198,6 +205,17 @@ func verifyGiteeSignature(secret string, r *http.Request) error {
 	return nil
 }
 
+func verifyGitLabToken(secret string, r *http.Request) error {
+	token := strings.TrimSpace(r.Header.Get("X-Gitlab-Token"))
+	if token == "" {
+		return errors.New("missing X-Gitlab-Token")
+	}
+	if subtle.ConstantTimeCompare([]byte(secret), []byte(token)) != 1 {
+		return errors.New("invalid GitLab token")
+	}
+	return nil
+}
+
 func verifyTimestamp(value string) error {
 	raw, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
@@ -220,6 +238,9 @@ func isPushEvent(provider, event string, payload pushPayload) bool {
 	event = strings.ToLower(strings.TrimSpace(event))
 	if provider == "gitee" {
 		return strings.Contains(event, "push") || payload.HookName == "push_hooks"
+	}
+	if provider == "gitlab" {
+		return event == strings.ToLower("Push Hook")
 	}
 	return event == "push"
 }

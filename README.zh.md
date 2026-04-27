@@ -29,6 +29,7 @@ Candy 是一个轻量级 webhook 部署中枢。它对外暴露兼容 GitHub / G
 - 支持仓库源复用：共享 Git 地址和 deployment key，再按环境分别绑定分支、脚本和 Runner。
 - GitHub `X-Hub-Signature-256` 校验。
 - Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` 标准签名校验。
+- GitLab `X-Gitlab-Token` 校验。
 - delivery 去重，非目标分支忽略，任务异步入队。
 - 中心服务 clone/fetch，并 checkout 到 webhook 指定 commit。
 - 本机 Runner：在工作目录中执行 `bash -lc`。
@@ -198,6 +199,7 @@ Candy 现在将仓库信息拆成两层：
 
 - GitHub：Webhook URL 填 `https://your-host/webhooks/{webhookId}`，Content type 选 `application/json`，Secret 填管理台生成或设置的 secret，事件选择 push。
 - Gitee：Webhook URL 填同一个地址，密钥填管理台 secret，选择 push 事件；推荐使用 Gitee 的签名密钥校验模式。
+- GitLab：Webhook URL 填 `https://your-host/webhooks/{webhookId}`，Secret Token 填 Candy 中展示的密钥，并启用 Push events 触发器。
 
 只有 payload 中的分支等于仓库配置的触发分支时，任务才会入队。
 

@@ -98,6 +98,7 @@ const I18N = {
     provider: {
       github: 'GitHub',
       gitee: 'Gitee',
+      gitlab: 'GitLab',
       generic: 'Auto-detect'
     },
     runnerMode: {
@@ -261,6 +262,7 @@ const I18N = {
       branch: 'Default branch',
       providerGithub: 'GitHub',
       providerGitee: 'Gitee',
+      providerGitlab: 'GitLab',
       providerGeneric: 'Auto-detect',
       sourceKicker: 'Repository Source',
       sourceTitle: 'Repository source',
@@ -458,6 +460,7 @@ const I18N = {
     provider: {
       github: 'GitHub',
       gitee: 'Gitee',
+      gitlab: 'GitLab',
       generic: '自动识别'
     },
     runnerMode: {
@@ -621,6 +624,7 @@ const I18N = {
       branch: '默认分支',
       providerGithub: 'GitHub',
       providerGitee: 'Gitee',
+      providerGitlab: 'GitLab',
       providerGeneric: '自动识别',
       sourceKicker: '仓库源',
       sourceTitle: '仓库源',
@@ -984,6 +988,8 @@ function providerLabel(locale, provider) {
   switch (provider) {
     case 'gitee':
       return translate(locale, 'provider.gitee');
+    case 'gitlab':
+      return translate(locale, 'provider.gitlab');
     case 'generic':
       return translate(locale, 'provider.generic');
     default:
@@ -2518,6 +2524,7 @@ function RepositoryPage({
   const providerOptions = useMemo(() => ([
     { value: 'github', label: t('repository.providerGithub'), badge: 'GH' },
     { value: 'gitee', label: t('repository.providerGitee'), badge: 'GI' },
+    { value: 'gitlab', label: t('repository.providerGitlab'), badge: 'GL' },
     { value: 'generic', label: t('repository.providerGeneric'), badge: '::' }
   ]), [t]);
   const repositorySourceOptions = useMemo(
