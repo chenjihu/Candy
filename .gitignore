@@ -9,3 +9,4 @@ dist/
 .cache/
 .playwright-cli/
 .env
+candy.db

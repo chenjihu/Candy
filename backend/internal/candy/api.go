@@ -258,7 +258,7 @@ func (a *App) handleGetRepository(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(r.Context(), resourceID, false)
+	repository, err := a.store.getEnvironmentRepositoryRecordByResourceID(r.Context(), resourceID, true)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, errors.New("repository not found"))
 		return

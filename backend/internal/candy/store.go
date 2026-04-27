@@ -1117,6 +1117,7 @@ func (s *Store) scanEnvironmentRepository(row scanner, includeSensitive bool) (e
 		repository.RunnerID = strconv.FormatInt(runnerID.Int64, 10)
 	}
 	repository.HasDeployKey = deployKeyCipher != ""
+	repository.HasWebhookSecret = repository.WebhookSecretCipher != ""
 	repository.CleanWorktree = clean != 0
 	repository.WebhookURL = fmt.Sprintf("%s/webhooks/%s", s.publicURL, repository.WebhookID)
 	if includeSensitive {

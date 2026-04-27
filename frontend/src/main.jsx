@@ -212,7 +212,11 @@ const I18N = {
         globalDescription: 'Available to every repository.',
         repositoryScope: 'Repository',
         repositoryPlaceholder: 'All repositories',
-        cancelEdit: 'Cancel edit'
+        cancelEdit: 'Cancel edit',
+        availableLabel: 'Available secrets',
+        availableEmpty: 'No secrets available',
+        scopeRepo: 'repo',
+        scopeGlobal: 'global'
       },
       logs: {
         filterPlaceholder: 'Filter by repository...',
@@ -574,7 +578,11 @@ const I18N = {
         globalDescription: '对所有仓库生效。',
         repositoryScope: '仓库',
         repositoryPlaceholder: '全部仓库',
-        cancelEdit: '取消编辑'
+        cancelEdit: '取消编辑',
+        availableLabel: '可用 Secrets',
+        availableEmpty: '暂无可用 Secret',
+        scopeRepo: '仓库',
+        scopeGlobal: '全局'
       },
       logs: {
         filterPlaceholder: '按仓库筛选...',
@@ -2224,6 +2232,7 @@ function DashboardPage({
                   <RepoCard
                     key={repo.id}
                     repo={repo}
+                    secrets={secrets}
                     onCopy={copyValue}
                     onEdit={() => navigate(`/add-repository?edit=true&id=${repo.id}`)}
                     onTrigger={() => triggerRepository(repo)}
@@ -2509,12 +2518,11 @@ function RepositoryPage({
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const editId = params.get('id');
   const isEditMode = params.get('edit') === 'true';
-  const editingRepo = useMemo(
-    () => repos.find((repo) => String(repo.id) === String(editId)),
-    [editId, repos]
-  );
+  const [editingRepo, setEditingRepo] = useState(null);
+  const [loadingRepo, setLoadingRepo] = useState(false);
+  const formInitialized = useRef(false);
 
-  const [form, setForm] = useState(() => createRepoForm(editingRepo, repositorySources));
+  const [form, setForm] = useState(() => createRepoForm(null, repositorySources));
   const [copied, setCopied] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const selectedSource = useMemo(
@@ -2538,19 +2546,44 @@ function RepositoryPage({
     [locale, repositorySources]
   );
 
+  // Fetch single repository detail (with webhookSecret) once when entering edit mode.
   useEffect(() => {
-    if (editingRepo) {
-      setForm(createRepoForm(editingRepo, repositorySources));
+    if (!editId) {
       return;
     }
+    let active = true;
+    setLoadingRepo(true);
+    api(`/api/repositories/${editId}`)
+      .then((data) => {
+        if (active) setEditingRepo(data);
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoadingRepo(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [editId, setError]);
 
-    setForm((current) => {
-      if (current.repositorySourceId || current.sourceName || current.repoUrl) {
-        return current;
+  // Initialize the form exactly once per editId, after repo detail and sources are loaded.
+  useEffect(() => {
+    if (formInitialized.current) {
+      return;
+    }
+    if (editId) {
+      if (!editingRepo || repositorySources.length === 0) {
+        return;
       }
-      return createRepoForm(null, repositorySources);
-    });
-  }, [editId, editingRepo?.id, editingRepo?.repositorySourceId, repositorySources.length]);
+      setForm(createRepoForm(editingRepo, repositorySources));
+      formInitialized.current = true;
+    } else {
+      setForm(createRepoForm(null, repositorySources));
+      formInitialized.current = true;
+    }
+  }, [editId, editingRepo, repositorySources]);
 
   function regenerateSecret() {
     setForm((current) => ({ ...current, webhookSecret: randomSecret() }));
@@ -2655,18 +2688,18 @@ function RepositoryPage({
     <div className="page-shell environment-shell" style={environmentShellStyle(selectedEnvironment)}>
       <header className="subpage-header">
         <div className="content-width subpage-header-inner">
-          <div className="subpage-header-actions">
-            <LocaleSwitch />
-            <Button type="button" variant="ghost" onClick={() => navigate('/dashboard?tab=repositories', { replace: true })}>
-              {t('repository.back')}
-            </Button>
-          </div>
           <div className="subpage-title">
             <h1>{isEditMode ? t('repository.titleEdit') : t('repository.titleCreate')}</h1>
             <p>{t('repository.description')}</p>
             {selectedEnvironment && (
               <EnvironmentBadge environment={selectedEnvironment} />
             )}
+          </div>
+          <div className="subpage-header-actions">
+            <Button type="button" variant="ghost" onClick={() => navigate('/dashboard?tab=repositories', { replace: true })}>
+              {t('repository.back')}
+            </Button>
+            <LocaleSwitch />
           </div>
         </div>
       </header>
@@ -3093,18 +3126,18 @@ function RunnerPage({
     <div className="page-shell environment-shell" style={environmentShellStyle(selectedEnvironment)}>
       <header className="subpage-header">
         <div className="content-width subpage-header-inner">
-          <div className="subpage-header-actions">
-            <LocaleSwitch />
-            <Button type="button" variant="ghost" onClick={() => navigate('/dashboard?tab=runners', { replace: true })}>
-              {t('runner.back')}
-            </Button>
-          </div>
           <div className="subpage-title">
             <h1>{isEditMode ? t('runner.titleEdit') : t('runner.titleCreate')}</h1>
             <p>{t('runner.description')}</p>
             {selectedEnvironment && (
               <EnvironmentBadge environment={selectedEnvironment} />
             )}
+          </div>
+          <div className="subpage-header-actions">
+            <Button type="button" variant="ghost" onClick={() => navigate('/dashboard?tab=runners', { replace: true })}>
+              {t('runner.back')}
+            </Button>
+            <LocaleSwitch />
           </div>
         </div>
       </header>
@@ -4144,8 +4177,11 @@ function DeploymentRow({ job, onClick }) {
   );
 }
 
-function RepoCard({ repo, onCopy, onEdit, onTrigger, onDelete }) {
+function RepoCard({ repo, secrets = [], onCopy, onEdit, onTrigger, onDelete }) {
   const { locale, t } = useI18n();
+  const availableSecrets = useMemo(() => {
+    return secrets.filter((s) => !s.repositoryId || String(s.repositoryId) === String(repo.id));
+  }, [secrets, repo.id]);
   return (
     <Card className="repo-card">
       <div className="repo-top">
@@ -4177,14 +4213,24 @@ function RepoCard({ repo, onCopy, onEdit, onTrigger, onDelete }) {
         />
         <MetaBlock
           label={t('labels.webhookSecret')}
-          value={repo.webhookSecret ? maskSecret(repo.webhookSecret) : t('common.notSet')}
-          copyValue={repo.webhookSecret}
-          onCopy={onCopy}
+          value={repo.hasWebhookSecret ? t('repository.deploymentKeyConfigured') : t('repository.deploymentKeyMissing')}
         />
-        <MetaBlock
-          label={t('labels.deploymentScript')}
-          value={scriptPreview(repo.deployScript, locale)}
-        />
+      </div>
+
+      <div className="repo-secrets">
+        <span className="repo-secrets-label">{t('dashboard.secrets.availableLabel')}</span>
+        {availableSecrets.length ? (
+          <div className="repo-secrets-list">
+            {availableSecrets.map((s) => (
+              <span key={s.id} className={`secret-chip${s.repositoryId ? ' scoped' : ''}`}>
+                <code>{s.name}</code>
+                <em>{s.repositoryId ? t('dashboard.secrets.scopeRepo') : t('dashboard.secrets.scopeGlobal')}</em>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="repo-secrets-empty">{t('dashboard.secrets.availableEmpty')}</span>
+        )}
       </div>
 
       <div className="repo-footer">

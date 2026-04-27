@@ -80,6 +80,7 @@ type EnvironmentRepository struct {
 	Provider                   string    `json:"provider"`
 	RepoURL                    string    `json:"repoUrl"`
 	WebhookSecret              string    `json:"webhookSecret,omitempty"`
+	HasWebhookSecret           bool      `json:"hasWebhookSecret"`
 	WebhookURL                 string    `json:"webhookUrl,omitempty"`
 	WebhookID                  string    `json:"-"`
 	Branch                     string    `json:"branch"`

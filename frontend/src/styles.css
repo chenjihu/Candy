@@ -1430,6 +1430,68 @@ code {
   height: 16px;
 }
 
+.repo-secrets {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  border-radius: var(--radius-sm);
+}
+
+.repo-secrets-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.repo-secrets-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.secret-chip {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.8rem;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+}
+
+.secret-chip code {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.secret-chip em {
+  background: var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
+.secret-chip.scoped em {
+  background: var(--brand-blue-soft, #eaf5ff);
+  color: var(--brand-blue-dark, #1b8cd2);
+}
+
+.repo-secrets-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
 .repo-footer {
   display: flex;
   flex-wrap: wrap;
