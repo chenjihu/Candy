@@ -94,6 +94,9 @@ type EnvironmentRepository struct {
 	HasDeployKey               bool      `json:"hasDeployKey"`
 	CreatedAt                  time.Time `json:"createdAt"`
 	UpdatedAt                  time.Time `json:"updatedAt"`
+	LastJobStatus              string    `json:"lastJobStatus,omitempty"`
+	LastJobCommit              string    `json:"lastJobCommit,omitempty"`
+	LastJobFinished            string    `json:"lastJobFinished,omitempty"`
 }
 
 type Secret struct {

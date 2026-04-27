@@ -1026,7 +1026,10 @@ func environmentRepositorySelectSQL() string {
 		er.repository_source_id, s.public_id, s.name, s.provider, s.repo_url,
 		er.webhook_secret_cipher, er.webhook_id, er.branch, er.work_dir, er.deploy_script,
 		er.runner_id, COALESCE(a.name, ''), er.clean_worktree, s.deploy_key_cipher,
-		er.created_at, er.updated_at
+		er.created_at, er.updated_at,
+		COALESCE((SELECT status FROM deploy_jobs WHERE environment_repository_id = er.id ORDER BY id DESC LIMIT 1), ''),
+		COALESCE((SELECT commit_sha FROM deploy_jobs WHERE environment_repository_id = er.id ORDER BY id DESC LIMIT 1), ''),
+		COALESCE((SELECT COALESCE(finished_at, started_at, created_at) FROM deploy_jobs WHERE environment_repository_id = er.id ORDER BY id DESC LIMIT 1), '')
 		FROM environment_repositories er
 		INNER JOIN environments e ON e.id = er.environment_id
 		INNER JOIN repository_sources s ON s.id = er.repository_source_id
@@ -1087,6 +1090,7 @@ func (s *Store) scanEnvironmentRepository(row scanner, includeSensitive bool) (e
 	var deployKeyCipher string
 	var clean int
 	var createdAt, updatedAt string
+	var lastStatus, lastCommit, lastFinished string
 	if err := row.Scan(
 		&repository.InternalID,
 		&repository.ID,
@@ -1109,9 +1113,15 @@ func (s *Store) scanEnvironmentRepository(row scanner, includeSensitive bool) (e
 		&deployKeyCipher,
 		&createdAt,
 		&updatedAt,
+		&lastStatus,
+		&lastCommit,
+		&lastFinished,
 	); err != nil {
 		return repository, err
 	}
+	repository.LastJobStatus = lastStatus
+	repository.LastJobCommit = lastCommit
+	repository.LastJobFinished = lastFinished
 	if runnerID.Valid {
 		repository.RunnerInternalID = &runnerID.Int64
 		repository.RunnerID = strconv.FormatInt(runnerID.Int64, 10)
