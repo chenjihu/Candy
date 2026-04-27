@@ -25,7 +25,7 @@ Candy 是一个轻量级 webhook 部署中枢。它对外暴露兼容 GitHub / G
 ## 当前功能
 
 - 管理后台登录，超级管理员用户名和密码来自环境变量。
-- 支持 `Production`、`Staging`、`Test` 等运行环境，并为不同环境提供明显的界面色彩提示。
+- 支持系统内置 `Production`、系统内置 `Testing` 和自定义运行环境，并为不同环境提供明显的界面色彩提示。
 - 支持仓库源复用：共享 Git 地址和 deployment key，再按环境分别绑定分支、脚本和 Runner。
 - GitHub `X-Hub-Signature-256` 校验。
 - Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` 签名校验，并兼容旧式 token 等值校验。
@@ -38,29 +38,9 @@ Candy 是一个轻量级 webhook 部署中枢。它对外暴露兼容 GitHub / G
 
 ## 原理图
 
-```mermaid
-flowchart LR
-    admin["运维人员<br/>浏览器管理后台"] --> ui["Candy Admin UI<br/>环境 / 仓库 / Runner / 历史"]
-    ui --> api["Candy Server<br/>Go API"]
+![Candy 部署架构图](docs/readme/architecture.zh.svg)
 
-    github["GitHub / Gitee<br/>push webhook"] --> webhook["/webhooks/{webhookId}<br/>签名校验 / 分支过滤 / 去重"]
-    webhook --> queue["部署任务队列<br/>queued / running / succeeded / failed"]
-    api --> db[("SQLite<br/>环境 / 仓库源 / 绑定 / Secret / 任务 / 日志")]
-    webhook --> db
-    queue --> db
-
-    queue --> git["中心服务拉代码<br/>clone / fetch / checkout commit"]
-    git --> local{"目标执行端"}
-    local -->|未配置 Runner| localRunner["本机 Runner<br/>工作目录执行 bash"]
-    local -->|配置 SSH Runner| sshRunner["SSH Runner<br/>scp 分发代码<br/>ssh 执行 bash"]
-
-    localRunner --> result["stdout / stderr / exit code"]
-    sshRunner --> result
-    result --> db
-    db --> ui
-```
-
-一句话理解：Git 平台只负责把 push 事件打到 Candy；Candy 通过 `webhookId` 定位环境绑定，再从共享仓库源拉代码、选择本机或 SSH Runner 执行部署脚本，并把全过程写入 SQLite 供管理后台查看。
+一句话理解：Candy 将 Git webhook 事件转成按环境隔离的部署任务。控制平面通过 `webhookId` 定位环境仓库绑定，将共享仓库源、环境级配置和 Secret 组合起来，再分发到本机或 SSH Runner 执行，并把完整操作轨迹写入 SQLite。
 
 ## 启动
 
@@ -182,7 +162,7 @@ cp env.example .env
 
 ## 环境
 
-Candy 支持多个运行环境，例如 `Production`、`Staging`、`Test`。
+Candy 支持多个运行环境。全新安装会自动包含 `Production` 和 `Testing`，管理员也可以在控制台中新增自定义环境。
 
 - Runner、Secret、部署绑定和部署历史按环境隔离
 - 界面会用环境专属强调色提示当前操作环境，降低误操作风险

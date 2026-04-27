@@ -25,7 +25,7 @@ Terminology: this document uses Runner for the deployment execution endpoint. Wh
 ## Features
 
 - Admin dashboard login. The super admin username and password come from environment variables.
-- Environment-aware deployment bindings with dedicated colors for `Production`, `Staging`, `Test`, or custom environments.
+- Environment-aware deployment bindings with dedicated colors for built-in `Production`, built-in `Testing`, or custom environments.
 - Repository source reuse: keep one shared Git source and deployment key, then bind different branches and scripts per environment.
 - GitHub `X-Hub-Signature-256` verification.
 - Gitee `X-Gitee-Token` + `X-Gitee-Timestamp` signature verification, with legacy token equality fallback.
@@ -38,29 +38,9 @@ Terminology: this document uses Runner for the deployment execution endpoint. Wh
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    admin["Ops team<br/>Browser dashboard"] --> ui["Candy Admin UI<br/>Environments / Repos / Runners / History"]
-    ui --> api["Candy Server<br/>Go API"]
+![Candy deployment architecture](docs/readme/architecture.svg)
 
-    github["GitHub / Gitee<br/>push webhook"] --> webhook["/webhooks/{webhookId}<br/>signature check / branch filter / dedupe"]
-    webhook --> queue["Deployment job queue<br/>queued / running / succeeded / failed"]
-    api --> db[("SQLite<br/>environments / repository sources / bindings / secrets / jobs / logs")]
-    webhook --> db
-    queue --> db
-
-    queue --> git["Central code fetch<br/>clone / fetch / checkout commit"]
-    git --> local{"Target execution endpoint"}
-    local -->|No Runner configured| localRunner["Local Runner<br/>run bash in work dir"]
-    local -->|SSH Runner configured| sshRunner["SSH Runner<br/>scp code<br/>ssh run bash"]
-
-    localRunner --> result["stdout / stderr / exit code"]
-    sshRunner --> result
-    result --> db
-    db --> ui
-```
-
-In one sentence: Git platforms only deliver push events to Candy; Candy resolves the environment binding by `webhookId`, fetches code from the shared repository source, selects the local or SSH Runner, runs the deployment script, and stores the full trace in SQLite for the admin dashboard.
+In one sentence: Candy turns Git webhook events into environment-scoped deployment runs. The control plane resolves the `webhookId`, combines the shared repository source with the selected environment binding, injects Secrets, dispatches to the local or SSH Runner, and stores the full operational trace in SQLite.
 
 ## Getting Started
 
@@ -182,7 +162,7 @@ All variables can be provided either through shell environment variables or a `.
 
 ## Environments
 
-Candy supports multiple runtime environments such as `Production`, `Staging`, and `Test`.
+Candy supports multiple runtime environments. A fresh installation automatically includes `Production` and `Testing`, and administrators can add custom environments from the dashboard.
 
 - Runners, Secrets, deployment bindings, and deployment history are isolated per environment.
 - The UI highlights the current environment with a dedicated accent color to reduce mistakes.
