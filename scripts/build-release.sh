@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-1.2.0}"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/dist/release}"
 TARGETS="${TARGETS:-linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64}"
 SKIP_NPM_INSTALL="${SKIP_NPM_INSTALL:-0}"
