@@ -1461,6 +1461,11 @@ function App() {
     setLogs(data || []);
   }, []);
 
+  const clearSelectedJob = useCallback(() => {
+    setSelectedJob(null);
+    setLogs([]);
+  }, []);
+
   useEffect(() => {
     let active = true;
     api('/api/auth/me')
@@ -1632,6 +1637,7 @@ function App() {
           search={location.search}
           refreshData={refreshData}
           loadJobLogs={loadJobLogs}
+          clearSelectedJob={clearSelectedJob}
           onEnvironmentChange={handleEnvironmentChange}
           onLogout={handleLogout}
         />
@@ -1790,6 +1796,7 @@ function DashboardPage({
   search,
   refreshData,
   loadJobLogs,
+  clearSelectedJob,
   onEnvironmentChange,
   onLogout
 }) {
@@ -1835,6 +1842,30 @@ function DashboardPage({
   useEffect(() => {
     setTab(requestedTab);
   }, [requestedTab]);
+
+  const [lastViewedJobId, setLastViewedJobId] = useState(null);
+
+  useEffect(() => {
+    if (selectedJob || !lastViewedJobId) {
+      return;
+    }
+    const handle = window.requestAnimationFrame(() => {
+      const node = document.querySelector(`[data-job-id="${lastViewedJobId}"]`);
+      if (node) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        node.classList.add('history-row-flash');
+        window.setTimeout(() => node.classList.remove('history-row-flash'), 1500);
+      }
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [selectedJob, lastViewedJobId]);
+
+  function returnToHistory() {
+    if (selectedJob) {
+      setLastViewedJobId(selectedJob.id);
+    }
+    clearSelectedJob();
+  }
 
   const completedJobs = jobs.filter((job) => job.status === 'succeeded' || job.status === 'failed');
   const successfulJobs = jobs.filter((job) => job.status === 'succeeded').length;
@@ -2418,10 +2449,7 @@ function DashboardPage({
                   type="button"
                   variant="outline"
                   className="btn-wide"
-                  onClick={() => {
-                    setSelectedJob(null);
-                    setLogs([]);
-                  }}
+                  onClick={returnToHistory}
                 >
                   {t('dashboard.logs.backToHistory')}
                 </Button>
@@ -4181,7 +4209,7 @@ function MetricCard({ label, value, caption, tone }) {
 function DeploymentRow({ job, onClick }) {
   const { locale, t } = useI18n();
   return (
-    <button type="button" className="history-row" onClick={onClick}>
+    <button type="button" className="history-row" onClick={onClick} data-job-id={job.id}>
       <div className="history-main">
         <div className="history-top">
           <strong>{job.repositoryName}</strong>
