@@ -193,6 +193,34 @@ The login endpoint has brute-force protection enabled by default, and failure co
 
 If the service is deployed behind Nginx, Caddy, Traefik, or another reverse proxy and you need login limits based on the real client IP, make sure the proxy overwrites and sanitizes `X-Forwarded-For` / `X-Real-IP` before enabling `CANDY_TRUST_PROXY_HEADERS=true`.
 
+### Behind an Nginx reverse proxy
+
+Without this configuration, every recorded login IP will be `127.0.0.1` (the Nginx loopback address), and per-IP lockout will not work. To fix it:
+
+1. Enable the trust flag on the Candy service (`.env` or systemd `EnvironmentFile`):
+
+   ```dotenv
+   CANDY_TRUST_PROXY_HEADERS=true
+   ```
+
+   Then restart `candyd`.
+
+2. Make Nginx actually forward the real client IP:
+
+   ```nginx
+   location / {
+       proxy_pass         http://127.0.0.1:8080;
+       proxy_set_header   Host              $host;
+       proxy_set_header   X-Real-IP         $remote_addr;
+       proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+       proxy_set_header   X-Forwarded-Proto $scheme;
+   }
+   ```
+
+After both steps are in place, the Login activity tab will show the real client IP. `X-Forwarded-For` (first entry) takes priority, with `X-Real-IP` as a fallback.
+
+> **Security note:** Only turn on `CANDY_TRUST_PROXY_HEADERS` when Candy is actually fronted by a trusted reverse proxy. If the service is directly reachable by clients, an attacker can forge `X-Forwarded-For` to spoof the logged IP and bypass per-IP brute-force lockout. Keep `CANDY_ADDR` bound to `127.0.0.1` (or an internal network) when this flag is enabled.
+
 ## Webhook Setup
 
 After creating an environment repository binding in the admin console, copy the webhook URL and secret from the repository row:

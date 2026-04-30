@@ -193,6 +193,34 @@ Candy 现在将仓库信息拆成两层：
 
 如果服务部署在 Nginx、Caddy、Traefik 等反向代理之后，并且需要按真实客户端 IP 限制登录，请确保代理层覆盖并清洗客户端传入的 `X-Forwarded-For` / `X-Real-IP` 后，再开启 `CANDY_TRUST_PROXY_HEADERS=true`。
 
+### 部署在 Nginx 反向代理之后
+
+如果未做如下配置，后台记录的登录 IP 会一直是 `127.0.0.1`（Nginx 本地回环地址），按 IP 的登录锁定也会失效。修复方式：
+
+1. 在 Candy 服务端启用信任代理请求头（写入 `.env` 或 systemd `EnvironmentFile`）：
+
+   ```dotenv
+   CANDY_TRUST_PROXY_HEADERS=true
+   ```
+
+   重启 `candyd` 使其生效。
+
+2. 让 Nginx 将真实客户端 IP 透传下来：
+
+   ```nginx
+   location / {
+       proxy_pass         http://127.0.0.1:8080;
+       proxy_set_header   Host              $host;
+       proxy_set_header   X-Real-IP         $remote_addr;
+       proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+       proxy_set_header   X-Forwarded-Proto $scheme;
+   }
+   ```
+
+两步生效后，后台“登录记录”中的 IP 就会是真实来源 IP。`X-Forwarded-For`（取第一个地址）优先，其次回退到 `X-Real-IP`。
+
+> **安全提示：** 只有在 Candy 确实位于受信任的反向代理之后时才开启 `CANDY_TRUST_PROXY_HEADERS`。如果服务可以被客户端直接访问，攻击者可以伪造 `X-Forwarded-For` 伪造来源 IP，并绕过按 IP 的登录锁定。启用此开关时，建议同时将 `CANDY_ADDR` 绑定到 `127.0.0.1` 或内网地址。
+
 ## Webhook 配置
 
 在管理台创建环境仓库绑定后，复制仓库行中的 webhook 地址和密钥：
