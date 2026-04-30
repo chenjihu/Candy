@@ -59,6 +59,8 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", a.requireAuth(a.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", a.requireAuth(a.handleMe))
 
+	mux.HandleFunc("GET /api/login-logs", a.requireAuth(a.handleListLoginLogs))
+
 	mux.HandleFunc("GET /api/environments", a.requireAuth(a.handleListEnvironments))
 	mux.HandleFunc("POST /api/environments", a.requireAuth(a.handleCreateEnvironment))
 	mux.HandleFunc("PUT /api/environments/{id}", a.requireAuth(a.handleUpdateEnvironment))

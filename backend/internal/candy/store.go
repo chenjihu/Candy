@@ -175,6 +175,14 @@ func (s *Store) migrate(ctx context.Context) error {
 			locked_until TEXT NOT NULL DEFAULT ''
 		);`,
 		`CREATE INDEX IF NOT EXISTS login_attempts_locked_until_idx ON login_attempts(locked_until);`,
+		`CREATE TABLE IF NOT EXISTS login_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL,
+			ip TEXT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('success', 'locked')),
+			created_at TEXT NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS login_logs_created_at_idx ON login_logs(created_at);`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -363,6 +371,36 @@ func (s *Store) ClearLoginFailures(ctx context.Context, scopes []string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) RecordLoginLog(ctx context.Context, username, ip, status string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO login_logs (username, ip, status, created_at) VALUES (?, ?, ?, ?)`,
+		strings.TrimSpace(username), strings.TrimSpace(ip), status, dbTime(time.Now()),
+	)
+	return err
+}
+
+func (s *Store) ListLoginLogs(ctx context.Context) ([]LoginLog, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, username, ip, status, created_at FROM login_logs ORDER BY id DESC LIMIT 200`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	logs := make([]LoginLog, 0)
+	for rows.Next() {
+		var entry LoginLog
+		var createdAt string
+		if err := rows.Scan(&entry.ID, &entry.Username, &entry.IP, &entry.Status, &createdAt); err != nil {
+			return nil, err
+		}
+		entry.CreatedAt = parseDBTime(createdAt)
+		logs = append(logs, entry)
+	}
+	return logs, rows.Err()
 }
 
 func (s *Store) ensureAdminUser(ctx context.Context, username, password string, updateExisting bool) error {

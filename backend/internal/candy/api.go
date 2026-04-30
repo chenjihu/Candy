@@ -13,6 +13,15 @@ import (
 
 var envNamePattern = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
+func (a *App) handleListLoginLogs(w http.ResponseWriter, r *http.Request) {
+	logs, err := a.store.ListLoginLogs(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, logs)
+}
+
 func (a *App) handleListEnvironments(w http.ResponseWriter, r *http.Request) {
 	environments, err := a.store.ListEnvironments(r.Context())
 	if err != nil {

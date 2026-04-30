@@ -94,11 +94,13 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	username := strings.TrimSpace(req.Username)
-	scopes := a.loginThrottlePolicies(username, loginRemoteIP(r, a.cfg.TrustProxyHeaders))
+	ip := loginRemoteIP(r, a.cfg.TrustProxyHeaders)
+	scopes := a.loginThrottlePolicies(username, ip)
 	if until, blocked, err := a.store.LoginBlocked(r.Context(), scopes, time.Now()); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	} else if blocked {
+		_ = a.store.RecordLoginLog(r.Context(), username, ip, "locked")
 		writeLoginLocked(w, until)
 		return
 	}
@@ -120,12 +122,14 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		} else if locked {
+			_ = a.store.RecordLoginLog(r.Context(), username, ip, "locked")
 			writeLoginLocked(w, until)
 			return
 		}
 		writeError(w, http.StatusUnauthorized, errInvalidLogin)
 		return
 	}
+	_ = a.store.RecordLoginLog(r.Context(), username, ip, "success")
 	if err := a.store.ClearLoginFailures(r.Context(), []string{loginUsernameScope(username)}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

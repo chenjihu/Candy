@@ -142,3 +142,11 @@ type JobLogLine struct {
 	Line      string    `json:"line"`
 	CreatedAt time.Time `json:"createdAt"`
 }
+
+type LoginLog struct {
+	ID        int64     `json:"id"`
+	Username  string    `json:"username"`
+	IP        string    `json:"ip"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"createdAt"`
+}

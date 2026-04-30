@@ -163,7 +163,8 @@ const I18N = {
         repositories: 'Repos',
         runners: 'Runners',
         secrets: 'Secrets',
-        logs: 'Logs'
+        logs: 'Logs',
+        loginLogs: 'Login'
       },
       metrics: {
         totalRepos: 'Total repositories',
@@ -235,6 +236,18 @@ const I18N = {
         emptyBody: 'Adjust the filters and take another look at recent deployments.',
         noLogs: 'No logs yet.',
         backToHistory: 'Back to history'
+      },
+      loginLogs: {
+        title: 'Login activity',
+        description: 'Successful sign-ins and brute-force lockouts are recorded here.',
+        emptyTitle: 'No login activity yet',
+        emptyBody: 'Sign-ins and lockouts will appear here after the next attempt.',
+        username: 'Username',
+        ip: 'IP',
+        status: 'Status',
+        time: 'Time',
+        statusSuccess: 'Success',
+        statusLocked: 'Locked'
       }
     },
     environments: {
@@ -529,7 +542,8 @@ const I18N = {
       repositories: '仓库',
       runners: 'Runners',
       secrets: 'Secrets',
-      logs: '日志'
+      logs: '日志',
+      loginLogs: '登录'
     },
       metrics: {
         totalRepos: '总仓库数',
@@ -601,6 +615,18 @@ const I18N = {
         emptyBody: '调整筛选条件后，再看看最近的部署。',
         noLogs: '暂无日志。',
         backToHistory: '返回历史'
+      },
+      loginLogs: {
+        title: '登录记录',
+        description: '这里记录登录成功以及触发登录防护被锁定的事件。',
+        emptyTitle: '暂无登录记录',
+        emptyBody: '下次登录或锁定后会出现在这里。',
+        username: '用户名',
+        ip: 'IP',
+        status: '状态',
+        time: '时间',
+        statusSuccess: '成功',
+        statusLocked: '已锁定'
       }
     },
     environments: {
@@ -1812,6 +1838,8 @@ function DashboardPage({
   const [confirmingAction, setConfirmingAction] = useState(false);
   const [environmentModalOpen, setEnvironmentModalOpen] = useState(false);
   const [editingEnvironmentId, setEditingEnvironmentId] = useState(selectedEnvironmentId);
+  const [loginLogs, setLoginLogs] = useState([]);
+  const [loginLogsLoading, setLoginLogsLoading] = useState(false);
   const [environmentForm, setEnvironmentForm] = useState({
     name: '',
     slug: '',
@@ -1842,6 +1870,33 @@ function DashboardPage({
   useEffect(() => {
     setTab(requestedTab);
   }, [requestedTab]);
+
+  useEffect(() => {
+    if (tab !== 'loginLogs') {
+      return;
+    }
+    let active = true;
+    setLoginLogsLoading(true);
+    api('/api/login-logs')
+      .then((data) => {
+        if (active) {
+          setLoginLogs(Array.isArray(data) ? data : []);
+        }
+      })
+      .catch((err) => {
+        if (active) {
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoginLogsLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab, setError]);
 
   const [lastViewedJobId, setLastViewedJobId] = useState(null);
 
@@ -2174,7 +2229,8 @@ function DashboardPage({
             { value: 'repositories', label: t('dashboard.tabs.repositories') },
             { value: 'runners', label: t('dashboard.tabs.runners') },
             { value: 'secrets', label: t('dashboard.tabs.secrets') },
-            { value: 'logs', label: t('dashboard.tabs.logs') }
+            { value: 'logs', label: t('dashboard.tabs.logs') },
+            { value: 'loginLogs', label: t('dashboard.tabs.loginLogs') }
           ].map((item) => (
             <button
               key={item.value}
@@ -2480,6 +2536,55 @@ function DashboardPage({
                 )}
               </Card>
             )}
+          </section>
+        )}
+
+        {tab === 'loginLogs' && (
+          <section className="section-stack">
+            <Card className="panel-card">
+              <SectionTitle
+                title={t('dashboard.loginLogs.title')}
+                description={t('dashboard.loginLogs.description')}
+              />
+              {loginLogsLoading && loginLogs.length === 0 ? (
+                <EmptyState
+                  title={t('dashboard.loginLogs.emptyTitle')}
+                  body={t('dashboard.loginLogs.emptyBody')}
+                />
+              ) : loginLogs.length ? (
+                <div className="login-logs-table">
+                  <div className="login-logs-row login-logs-row--head">
+                    <span>{t('dashboard.loginLogs.time')}</span>
+                    <span>{t('dashboard.loginLogs.username')}</span>
+                    <span>{t('dashboard.loginLogs.ip')}</span>
+                    <span>{t('dashboard.loginLogs.status')}</span>
+                  </div>
+                  {loginLogs.map((entry) => (
+                    <div key={entry.id} className="login-logs-row">
+                      <span className="login-logs-time">{formatTime(entry.createdAt, locale)}</span>
+                      <span className="login-logs-user">{entry.username || '-'}</span>
+                      <span className="login-logs-ip">{entry.ip || '-'}</span>
+                      <span
+                        className={
+                          entry.status === 'locked'
+                            ? 'login-log-status login-log-status--locked'
+                            : 'login-log-status login-log-status--success'
+                        }
+                      >
+                        {entry.status === 'locked'
+                          ? t('dashboard.loginLogs.statusLocked')
+                          : t('dashboard.loginLogs.statusSuccess')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title={t('dashboard.loginLogs.emptyTitle')}
+                  body={t('dashboard.loginLogs.emptyBody')}
+                />
+              )}
+            </Card>
           </section>
         )}
       </main>
