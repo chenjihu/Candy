@@ -1621,6 +1621,16 @@ function App() {
     }
   }
 
+  async function cancelJob(job) {
+    try {
+      await api(`/api/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' });
+      setNotice(t('notifications.cancelled', { id: job.id }));
+      await refreshData();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (booting) {
     return (
       <I18NContext.Provider value={i18nValue}>
@@ -2171,16 +2181,6 @@ function DashboardPage({
     try {
       await api(`/api/repositories/${repo.id}/trigger`, { method: 'POST', body: '{}' });
       setNotice(t('notifications.queued', { name: repo.name }));
-      await refreshData();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function cancelJob(job) {
-    try {
-      await api(`/api/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' });
-      setNotice(t('notifications.cancelled', { id: job.id }));
       await refreshData();
     } catch (err) {
       setError(err.message);
