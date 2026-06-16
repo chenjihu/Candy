@@ -208,21 +208,17 @@ func (s *Store) migrateDeployJobsStatus(ctx context.Context) error {
 	}
 
 	// Check if we can insert 'cancelled' status (tests if the constraint includes it)
-	_, err = s.db.ExecContext(ctx, `BEGIN TRANSACTION`)
+	// by checking the table schema directly
+	var checkConstraint string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='deploy_jobs'`).Scan(&checkConstraint)
 	if err != nil {
 		return err
 	}
-	defer s.db.ExecContext(ctx, `ROLLBACK`)
-
-	_, err = s.db.ExecContext(ctx, `UPDATE deploy_jobs SET status = 'cancelled' WHERE status = 'cancelled'`)
-	if err == nil {
+	if strings.Contains(checkConstraint, "'cancelled'") {
 		// Constraint already includes 'cancelled'
-		s.db.ExecContext(ctx, `ROLLBACK`)
 		return nil
 	}
-
-	// Need to migrate - recreate the table with new constraint
-	s.db.ExecContext(ctx, `ROLLBACK`)
 
 	_, err = s.db.ExecContext(ctx, `BEGIN TRANSACTION`)
 	if err != nil {
