@@ -190,7 +190,81 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	_, _ = s.db.ExecContext(ctx, `DROP TABLE IF EXISTS repositories`)
+	if err := s.migrateDeployJobsStatus(ctx); err != nil {
+		return err
+	}
 	_, err := s.ensureDefaultEnvironment(ctx)
+	return err
+}
+
+func (s *Store) migrateDeployJobsStatus(ctx context.Context) error {
+	// SQLite doesn't support ALTER TABLE to modify CHECK constraints.
+	// We need to recreate the table with the new constraint.
+	// First, check if the table exists with the old constraint
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='deploy_jobs'`).Scan(&count)
+	if err != nil || count == 0 {
+		return nil // Table doesn't exist yet, new schema will be created
+	}
+
+	// Check if we can insert 'cancelled' status (tests if the constraint includes it)
+	_, err = s.db.ExecContext(ctx, `BEGIN TRANSACTION`)
+	if err != nil {
+		return err
+	}
+	defer s.db.ExecContext(ctx, `ROLLBACK`)
+
+	_, err = s.db.ExecContext(ctx, `UPDATE deploy_jobs SET status = 'cancelled' WHERE status = 'cancelled'`)
+	if err == nil {
+		// Constraint already includes 'cancelled'
+		s.db.ExecContext(ctx, `ROLLBACK`)
+		return nil
+	}
+
+	// Need to migrate - recreate the table with new constraint
+	s.db.ExecContext(ctx, `ROLLBACK`)
+
+	_, err = s.db.ExecContext(ctx, `BEGIN TRANSACTION`)
+	if err != nil {
+		return err
+	}
+
+	statements := []string{
+		`CREATE TABLE deploy_jobs_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			environment_repository_id INTEGER NOT NULL REFERENCES environment_repositories(id) ON DELETE CASCADE,
+			runner_id INTEGER NULL REFERENCES runners(id) ON DELETE SET NULL,
+			provider TEXT NOT NULL,
+			event TEXT NOT NULL,
+			delivery_id TEXT NOT NULL DEFAULT '',
+			branch TEXT NOT NULL,
+			commit_sha TEXT NOT NULL DEFAULT '',
+			commit_message TEXT NOT NULL DEFAULT '',
+			commit_author TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'ignored')),
+			exit_code INTEGER NULL,
+			error TEXT NOT NULL DEFAULT '',
+			triggered_at TEXT NOT NULL,
+			started_at TEXT NULL,
+			finished_at TEXT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`INSERT INTO deploy_jobs_new SELECT * FROM deploy_jobs`,
+		`DROP TABLE deploy_jobs`,
+		`ALTER TABLE deploy_jobs_new RENAME TO deploy_jobs`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS deploy_jobs_delivery_idx ON deploy_jobs(environment_repository_id, delivery_id) WHERE delivery_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS deploy_jobs_status_idx ON deploy_jobs(status, id)`,
+		`CREATE INDEX IF NOT EXISTS deploy_jobs_environment_repository_idx ON deploy_jobs(environment_repository_id, id)`,
+	}
+
+	for _, stmt := range statements {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			s.db.ExecContext(ctx, `ROLLBACK`)
+			return err
+		}
+	}
+
+	_, err = s.db.ExecContext(ctx, `COMMIT`)
 	return err
 }
 
