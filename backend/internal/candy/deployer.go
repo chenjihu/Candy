@@ -66,13 +66,20 @@ func (d *Deployer) worker(ctx context.Context, workerID int) {
 			}
 		}
 		jobCtx, cancel := context.WithTimeout(ctx, d.app.cfg.JobTimeout)
+		d.app.registerJobCancel(job.ID, cancel)
 		exitCode, err := d.RunJob(jobCtx, job)
+		d.app.unregisterJobCancel(job.ID)
 		cancel()
 		status := "succeeded"
 		errText := ""
 		if err != nil {
-			status = "failed"
-			errText = err.Error()
+			if errors.Is(err, context.Canceled) {
+				status = "cancelled"
+				errText = "cancelled by user"
+			} else {
+				status = "failed"
+				errText = err.Error()
+			}
 		}
 		if finishErr := d.app.store.FinishJob(context.Background(), job.ID, status, exitCode, errText); finishErr != nil {
 			log.Printf("worker %d finish job %d: %v", workerID, job.ID, finishErr)

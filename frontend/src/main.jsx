@@ -90,6 +90,7 @@ const I18N = {
     status: {
       succeeded: 'Succeeded',
       failed: 'Failed',
+      cancelled: 'Cancelled',
       running: 'Running',
       queued: 'Queued',
       ignored: 'Ignored',
@@ -113,6 +114,7 @@ const I18N = {
       repoDeleted: 'Repository deleted',
       runnerDeleted: 'Runner deleted',
       queued: '{name} added to the queue',
+      cancelled: 'Job #{id} cancelled',
       localRunnerNoTest: 'The local Runner does not need a connection test.',
       runnerConnected: '{name} connection is healthy',
       repoSaved: 'Repository configuration updated',
@@ -469,6 +471,7 @@ const I18N = {
     status: {
       succeeded: '已成功',
       failed: '已失败',
+      cancelled: '已取消',
       running: '运行中',
       queued: '已排队',
       ignored: '已忽略',
@@ -492,6 +495,7 @@ const I18N = {
       repoDeleted: '仓库已删除',
       runnerDeleted: 'Runner 已删除',
       queued: '{name} 已进入队列',
+      cancelled: '任务 #{id} 已取消',
       localRunnerNoTest: '本机 Runner 无需测试连接。',
       runnerConnected: '{name} 连接正常',
       repoSaved: '仓库配置已更新',
@@ -1006,6 +1010,8 @@ function statusMeta(locale, status) {
       return { label: translate(locale, 'status.succeeded'), tone: 'success' };
     case 'failed':
       return { label: translate(locale, 'status.failed'), tone: 'danger' };
+    case 'cancelled':
+      return { label: translate(locale, 'status.cancelled'), tone: 'warning' };
     case 'running':
       return { label: translate(locale, 'status.running'), tone: 'running' };
     case 'queued':
@@ -1664,6 +1670,7 @@ function App() {
           refreshData={refreshData}
           loadJobLogs={loadJobLogs}
           clearSelectedJob={clearSelectedJob}
+          onCancelJob={cancelJob}
           onEnvironmentChange={handleEnvironmentChange}
           onLogout={handleLogout}
         />
@@ -1823,6 +1830,7 @@ function DashboardPage({
   refreshData,
   loadJobLogs,
   clearSelectedJob,
+  onCancelJob,
   onEnvironmentChange,
   onLogout
 }) {
@@ -2169,6 +2177,16 @@ function DashboardPage({
     }
   }
 
+  async function cancelJob(job) {
+    try {
+      await api(`/api/jobs/${job.id}/cancel`, { method: 'POST', body: '{}' });
+      setNotice(t('notifications.cancelled', { id: job.id }));
+      await refreshData();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function testRunner(runner) {
     if (runner.mode !== 'ssh') {
       setNotice(t('notifications.localRunnerNoTest'));
@@ -2476,7 +2494,18 @@ function DashboardPage({
                       {selectedJob.branch} · {shortSha(selectedJob.commitSha, locale)} · {selectedJob.commitMessage || t('common.noCommitMessage')}
                     </p>
                   </div>
-                  <Status status={selectedJob.status} />
+                  <div className="log-head-actions">
+                    <Status status={selectedJob.status} />
+                    {(selectedJob.status === 'queued' || selectedJob.status === 'running') && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        onClick={() => onCancelJob(selectedJob)}
+                      >
+                        {t('common.cancel')}
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="detail-grid">

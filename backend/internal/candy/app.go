@@ -20,6 +20,8 @@ type App struct {
 	sessions          *SessionManager
 	locks             sync.Map
 	dummyPasswordHash string
+	jobCancels        map[int64]context.CancelFunc
+	jobCancelsMu      sync.Mutex
 }
 
 func NewApp(cfg Config) (*App, error) {
@@ -45,11 +47,35 @@ func NewApp(cfg Config) (*App, error) {
 		box:               box,
 		sessions:          NewSessionManager(),
 		dummyPasswordHash: dummyPasswordHash,
+		jobCancels:        make(map[int64]context.CancelFunc),
 	}, nil
 }
 
 func (a *App) Close() error {
 	return a.store.Close()
+}
+
+func (a *App) registerJobCancel(jobID int64, cancel context.CancelFunc) {
+	a.jobCancelsMu.Lock()
+	defer a.jobCancelsMu.Unlock()
+	a.jobCancels[jobID] = cancel
+}
+
+func (a *App) unregisterJobCancel(jobID int64) {
+	a.jobCancelsMu.Lock()
+	defer a.jobCancelsMu.Unlock()
+	delete(a.jobCancels, jobID)
+}
+
+func (a *App) CancelJob(jobID int64) bool {
+	a.jobCancelsMu.Lock()
+	cancel, ok := a.jobCancels[jobID]
+	a.jobCancelsMu.Unlock()
+	if ok {
+		cancel()
+		return true
+	}
+	return false
 }
 
 func (a *App) Routes() http.Handler {
@@ -92,6 +118,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /api/jobs", a.requireAuth(a.handleListJobs))
 	mux.HandleFunc("GET /api/jobs/{id}", a.requireAuth(a.handleGetJob))
 	mux.HandleFunc("GET /api/jobs/{id}/logs", a.requireAuth(a.handleJobLogs))
+	mux.HandleFunc("POST /api/jobs/{id}/cancel", a.requireAuth(a.handleCancelJob))
 
 	mux.HandleFunc("POST /webhooks/{id}", a.handleWebhook)
 	mux.HandleFunc("/", a.serveFrontend)

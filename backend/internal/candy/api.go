@@ -557,6 +557,33 @@ func (a *App) handleJobLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, logs)
 }
 
+func (a *App) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	job, err := a.store.GetJob(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if job.Status != "queued" && job.Status != "running" {
+		writeError(w, http.StatusBadRequest, errors.New("job is not in a cancellable state"))
+		return
+	}
+	wasRunning := a.CancelJob(id)
+	if err := a.store.CancelJob(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if wasRunning {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "cancelled", "message": "running job cancelled"})
+	} else {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "cancelled", "message": "queued job removed"})
+	}
+}
+
 func (a *App) requireEnvironment(ctx context.Context, r *http.Request) (Environment, int, error) {
 	environmentID, err := requiredEnvironmentID(r)
 	if err != nil {

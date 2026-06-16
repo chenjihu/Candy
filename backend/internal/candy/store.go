@@ -145,7 +145,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			commit_sha TEXT NOT NULL DEFAULT '',
 			commit_message TEXT NOT NULL DEFAULT '',
 			commit_author TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'ignored')),
+			status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'ignored')),
 			exit_code INTEGER NULL,
 			error TEXT NOT NULL DEFAULT '',
 			triggered_at TEXT NOT NULL,
@@ -958,6 +958,24 @@ func (s *Store) FinishJob(ctx context.Context, id int64, status string, exitCode
 		status, nullableInt(exitCode), errText, dbTime(time.Now()), id,
 	)
 	return err
+}
+
+func (s *Store) CancelJob(ctx context.Context, id int64) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE deploy_jobs SET status = 'cancelled', finished_at = ? WHERE id = ? AND status IN ('queued', 'running')`,
+		dbTime(time.Now()), id,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errors.New("job is not in a cancellable state")
+	}
+	return nil
 }
 
 func (s *Store) AddJobLog(ctx context.Context, jobID int64, stream, line string) error {
